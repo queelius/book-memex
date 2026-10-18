@@ -25,20 +25,21 @@ opens in 2050.
 from __future__ import annotations
 
 import io
-import json
-import tarfile
-import zipfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator
 
 import yaml
+from arkiv import bundle_format, records_to_jsonl, write_bundle
 from sqlalchemy.orm import Session
 
 from ..db.models import Book, Marginalia, ReadingSession
 
 
-__all__ = ["export_arkiv", "ArkivExporter", "SCHEMA"]
+__all__ = ["export_arkiv", "ArkivExporter", "SCHEMA", "MEMBER"]
+
+# The records member of every bundle (and the importer's default).
+MEMBER = "records.jsonl"
 
 
 # Schema describing the JSONL record kinds emitted by this exporter.
@@ -117,24 +118,6 @@ SCHEMA: Dict[str, Any] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Bundle format detection
-# ---------------------------------------------------------------------------
-
-
-def _detect_compression(path: str | Path) -> str:
-    """Infer output format from *path*'s extension.
-
-    Returns one of ``"zip"``, ``"tar.gz"``, ``"dir"``.
-    """
-    lower = str(path).lower()
-    if lower.endswith(".zip"):
-        return "zip"
-    if lower.endswith(".tar.gz") or lower.endswith(".tgz"):
-        return "tar.gz"
-    return "dir"
-
-
 def _iso(dt: datetime | None) -> str | None:
     """Return ISO 8601 string or None."""
     if dt is None:
@@ -149,14 +132,13 @@ def _iso(dt: datetime | None) -> str | None:
 
 def _records_to_jsonl_bytes(records: Iterable[Dict[str, Any]]) -> tuple[bytes, Dict[str, int]]:
     """Serialise records to JSONL bytes and return live per-kind counts."""
+    records = list(records)
     counts: Dict[str, int] = {"book": 0, "marginalia": 0, "reading": 0}
-    buf = io.StringIO()
     for rec in records:
-        buf.write(json.dumps(rec, ensure_ascii=False) + "\n")
         kind = rec.get("kind")
         if kind in counts:
             counts[kind] += 1
-    return buf.getvalue().encode("utf-8"), counts
+    return records_to_jsonl(records), counts
 
 
 def _schema_yaml_bytes(counts: Dict[str, int]) -> bytes:
@@ -237,35 +219,6 @@ def _readme_bytes(counts: Dict[str, int]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def _write_file(path: Path, data: bytes) -> None:
-    path.write_bytes(data)
-
-
-def _write_zip(
-    path: Path, jsonl: bytes, schema_yaml: bytes, readme: bytes
-) -> None:
-    """Write the three bundle files into a single .zip archive."""
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("records.jsonl", jsonl)
-        zf.writestr("schema.yaml", schema_yaml)
-        zf.writestr("README.md", readme)
-
-
-def _write_tar_gz(
-    path: Path, jsonl: bytes, schema_yaml: bytes, readme: bytes
-) -> None:
-    """Write the three bundle files into a single .tar.gz archive."""
-    with tarfile.open(path, "w:gz") as tf:
-        for name, data in (
-            ("records.jsonl", jsonl),
-            ("schema.yaml", schema_yaml),
-            ("README.md", readme),
-        ):
-            info = tarfile.TarInfo(name=name)
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-
-
 # ---------------------------------------------------------------------------
 # Exporter class
 # ---------------------------------------------------------------------------
@@ -302,29 +255,21 @@ class ArkivExporter:
         at the archive file itself.
         """
         out_path = Path(out_path)
-        fmt = _detect_compression(out_path)
+        fmt = bundle_format(out_path)
 
-        # Build records once; serialise into the chosen format.
-        records = list(self._iter_records())
-        jsonl_bytes, counts = _records_to_jsonl_bytes(records)
-        schema_bytes = _schema_yaml_bytes(counts)
-        readme_bytes = _readme_bytes(counts)
+        # Build records once; write_bundle picks the layout from the path.
+        jsonl_bytes, counts = _records_to_jsonl_bytes(self._iter_records())
+        write_bundle(out_path, {
+            MEMBER: jsonl_bytes,
+            "schema.yaml": _schema_yaml_bytes(counts),
+            "README.md": _readme_bytes(counts),
+        })
 
-        if fmt == "zip":
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            _write_zip(out_path, jsonl_bytes, schema_bytes, readme_bytes)
-            records_path = schema_path = str(out_path)
-        elif fmt == "tar.gz":
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            _write_tar_gz(out_path, jsonl_bytes, schema_bytes, readme_bytes)
-            records_path = schema_path = str(out_path)
-        else:
-            out_path.mkdir(parents=True, exist_ok=True)
-            _write_file(out_path / "records.jsonl", jsonl_bytes)
-            _write_file(out_path / "schema.yaml", schema_bytes)
-            _write_file(out_path / "README.md", readme_bytes)
-            records_path = str(out_path / "records.jsonl")
+        if fmt == "dir":
+            records_path = str(out_path / MEMBER)
             schema_path = str(out_path / "schema.yaml")
+        else:
+            records_path = schema_path = str(out_path)
 
         return {
             "path": str(out_path),

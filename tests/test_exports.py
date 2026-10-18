@@ -1108,23 +1108,100 @@ class TestArkivExport:
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-class TestArkivDetectCompression:
-    """Bundle-format extension detection."""
+class TestArkivBundleFormat:
+    """The output path's extension picks the bundle format (via arkiv)."""
 
-    def test_plain_path_is_directory(self):
-        from book_memex.exports.arkiv import _detect_compression
-        assert _detect_compression("bundle") == "dir"
+    @pytest.fixture
+    def lib(self, tmp_path):
+        lib = Library.open(tmp_path / "lib")
+        yield lib
+        lib.close()
 
-    def test_zip_extension(self):
-        from book_memex.exports.arkiv import _detect_compression
-        assert _detect_compression("bundle.zip") == "zip"
-        assert _detect_compression("bundle.ZIP") == "zip"
+    def test_plain_path_is_directory(self, lib, tmp_path):
+        out = tmp_path / "bundle"
+        assert lib.export_arkiv(out)["format"] == "dir"
+        assert (out / "records.jsonl").is_file()
 
-    def test_tar_gz_extension(self):
-        from book_memex.exports.arkiv import _detect_compression
-        assert _detect_compression("bundle.tar.gz") == "tar.gz"
-        assert _detect_compression("bundle.TAR.GZ") == "tar.gz"
+    @pytest.mark.parametrize("name", ["bundle.zip", "bundle.ZIP"])
+    def test_zip_extension(self, lib, tmp_path, name):
+        import zipfile
 
-    def test_tgz_extension(self):
-        from book_memex.exports.arkiv import _detect_compression
-        assert _detect_compression("bundle.tgz") == "tar.gz"
+        out = tmp_path / name
+        assert lib.export_arkiv(out)["format"] == "zip"
+        assert zipfile.is_zipfile(out)
+
+    @pytest.mark.parametrize("name", ["bundle.tar.gz", "bundle.TAR.GZ", "bundle.tgz"])
+    def test_tar_gz_extension(self, lib, tmp_path, name):
+        import tarfile
+
+        out = tmp_path / name
+        assert lib.export_arkiv(out)["format"] == "tar.gz"
+        assert tarfile.is_tarfile(out)
+
+
+class TestArkivBundleReproducible:
+    """Two exports of the same library are identical (zip and tar.gz)."""
+
+    @pytest.fixture
+    def lib(self, tmp_path):
+        from book_memex.services.marginalia_service import MarginaliaService
+
+        lib = Library.open(tmp_path / "lib")
+        p = lib.library_path / "b.txt"
+        p.write_text("h")
+        book = lib.add_book(
+            p,
+            metadata={"title": "Bücher", "creators": ["Zoë"]},
+            extract_text=False,
+            extract_cover=False,
+        )
+        MarginaliaService(lib.session).create(
+            content="note", highlighted_text="p", book_ids=[book.id], page_number=3
+        )
+        yield lib
+        lib.close()
+
+    @staticmethod
+    def _member(path, name):
+        import tarfile
+        import zipfile
+
+        if str(path).endswith(".zip"):
+            with zipfile.ZipFile(path) as zf:
+                return zf.read(name)
+        with tarfile.open(path, "r:gz") as tf:
+            return tf.extractfile(name).read()
+
+    @pytest.mark.parametrize("ext", ["zip", "tar.gz"])
+    def test_records_member_identical(self, lib, tmp_path, ext):
+        a, b = tmp_path / f"a.{ext}", tmp_path / f"b.{ext}"
+        lib.export_arkiv(a)
+        lib.export_arkiv(b)
+        assert self._member(a, "records.jsonl") == self._member(b, "records.jsonl")
+
+    @pytest.mark.parametrize("ext", ["zip", "tar.gz"])
+    def test_bundle_bytes_identical_with_fixed_clock(self, lib, tmp_path, ext, monkeypatch):
+        """schema.yaml stamps ``exported_at`` and README.md today's date, so
+        the whole bundle is byte-identical only when the clock is fixed; the
+        container itself (timestamps, order, gzip header) adds no variation."""
+        from datetime import date, datetime, timezone
+
+        import book_memex.exports.arkiv as arkiv_mod
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+        class FixedDate(date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 1, 2)
+
+        monkeypatch.setattr(arkiv_mod, "datetime", FixedDatetime)
+        monkeypatch.setattr(arkiv_mod, "date", FixedDate)
+
+        a, b = tmp_path / f"a.{ext}", tmp_path / f"b.{ext}"
+        lib.export_arkiv(a)
+        lib.export_arkiv(b)
+        assert a.read_bytes() == b.read_bytes()

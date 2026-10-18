@@ -48,36 +48,18 @@ ecosystem and reserves the semantic for a future stricter-add mode.
 
 from __future__ import annotations
 
-import gzip
-import io
-import json
-import tarfile
-import zipfile
-from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from arkiv import iter_jsonl, peek_jsonl
+
+from ..exports.arkiv import MEMBER
 
 
 # ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
-
-
-def _jsonl_peek_first_record(reader) -> Optional[Dict[str, Any]]:
-    """Return the first parsed JSONL record, or None if unparseable/empty."""
-    try:
-        for line in reader:
-            if isinstance(line, bytes):
-                line = line.decode("utf-8")
-            line = line.strip()
-            if not line:
-                continue
-            rec = json.loads(line)
-            return rec if isinstance(rec, dict) else None
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return None
-    return None
 
 
 _KINDS = ("book", "marginalia", "reading")
@@ -109,114 +91,10 @@ def _is_book_memex_arkiv_record(rec: Dict[str, Any]) -> bool:
 
 def detect(path: str | Path) -> bool:
     """Return True if *path* looks like an arkiv bundle we can read."""
-    p = Path(path)
-    if not p.exists():
+    if not Path(path).exists():
         return False
-
-    if p.is_dir():
-        jsonl = p / "records.jsonl"
-        if not jsonl.is_file():
-            return False
-        with open(jsonl, encoding="utf-8") as f:
-            rec = _jsonl_peek_first_record(f)
-        return rec is not None and _is_book_memex_arkiv_record(rec)
-
-    lower = str(p).lower()
-
-    if lower.endswith(".zip"):
-        try:
-            with zipfile.ZipFile(p) as zf:
-                if "records.jsonl" not in zf.namelist():
-                    return False
-                with zf.open("records.jsonl") as f:
-                    rec = _jsonl_peek_first_record(f)
-            return rec is not None and _is_book_memex_arkiv_record(rec)
-        except (zipfile.BadZipFile, KeyError):
-            return False
-
-    if lower.endswith(".tar.gz") or lower.endswith(".tgz"):
-        try:
-            with tarfile.open(p, "r:gz") as tf:
-                try:
-                    member = tf.getmember("records.jsonl")
-                except KeyError:
-                    return False
-                extracted = tf.extractfile(member)
-                if extracted is None:
-                    return False
-                rec = _jsonl_peek_first_record(extracted)
-            return rec is not None and _is_book_memex_arkiv_record(rec)
-        except tarfile.TarError:
-            return False
-
-    if lower.endswith(".jsonl.gz"):
-        try:
-            with gzip.open(p, "rt", encoding="utf-8") as f:
-                rec = _jsonl_peek_first_record(f)
-            return rec is not None and _is_book_memex_arkiv_record(rec)
-        except (OSError, gzip.BadGzipFile):
-            return False
-
-    if lower.endswith(".jsonl"):
-        try:
-            with open(p, encoding="utf-8") as f:
-                rec = _jsonl_peek_first_record(f)
-            return rec is not None and _is_book_memex_arkiv_record(rec)
-        except OSError:
-            return False
-
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Bundle reading
-# ---------------------------------------------------------------------------
-
-
-def _open_jsonl(path: str | Path) -> Iterator[Dict[str, Any]]:
-    """Yield records from the records.jsonl inside a bundle, whatever its shape."""
-    p = Path(path)
-    if p.is_dir():
-        with open(p / "records.jsonl", encoding="utf-8") as f:
-            yield from _parse_jsonl_lines(f)
-        return
-
-    lower = str(p).lower()
-    if lower.endswith(".zip"):
-        with zipfile.ZipFile(p) as zf:
-            with zf.open("records.jsonl") as f:
-                text = io.TextIOWrapper(f, encoding="utf-8")
-                yield from _parse_jsonl_lines(text)
-        return
-    if lower.endswith(".tar.gz") or lower.endswith(".tgz"):
-        with tarfile.open(p, "r:gz") as tf:
-            member = tf.getmember("records.jsonl")
-            extracted = tf.extractfile(member)
-            if extracted is None:
-                return
-            text = io.TextIOWrapper(extracted, encoding="utf-8")
-            yield from _parse_jsonl_lines(text)
-        return
-    if lower.endswith(".jsonl.gz"):
-        with gzip.open(p, "rt", encoding="utf-8") as f:
-            yield from _parse_jsonl_lines(f)
-        return
-    if lower.endswith(".jsonl"):
-        with open(p, encoding="utf-8") as f:
-            yield from _parse_jsonl_lines(f)
-        return
-    raise ValueError(f"unrecognized arkiv bundle: {path!r}")
-
-
-def _parse_jsonl_lines(reader) -> Iterable[Dict[str, Any]]:
-    for line in reader:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            yield json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    rec = peek_jsonl(path, MEMBER)
+    return rec is not None and _is_book_memex_arkiv_record(rec)
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +203,7 @@ def import_arkiv(
         "reading_orphaned": 0,
     }
 
-    records = list(_open_jsonl(path))
+    records = list(iter_jsonl(path, MEMBER))
     session = library.session
 
     # Pass 1: books. We buffer unique_id -> Book so subsequent marginalia
@@ -333,8 +211,6 @@ def import_arkiv(
     uid_to_book: Dict[str, Book] = {}
 
     for rec in records:
-        if not isinstance(rec, dict):
-            continue
         if rec.get("kind") != "book":
             continue
         stats["books_seen"] += 1
@@ -379,8 +255,6 @@ def import_arkiv(
 
     # Pass 2: marginalia.
     for rec in records:
-        if not isinstance(rec, dict):
-            continue
         if rec.get("kind") != "marginalia":
             continue
         stats["marginalia_seen"] += 1
@@ -440,8 +314,6 @@ def import_arkiv(
 
     # Pass 3: reading sessions.
     for rec in records:
-        if not isinstance(rec, dict):
-            continue
         if rec.get("kind") != "reading":
             continue
         stats["reading_seen"] += 1
