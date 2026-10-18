@@ -51,16 +51,7 @@ Book similarity and recommendations:
 - `find_similar_books()` - Find similar books
 - TF-IDF and metadata-based similarity
 
-### ebk.plugins
-
-Plugin system:
-
-- `Plugin` - Base plugin class
-- `HookRegistry` - Event hooks
-- `PluginRegistry` - Plugin discovery
-
 ## See Also
 
 - [Python API Guide](../user-guide/api.md) - Detailed API usage
 - [Architecture](architecture.md) - System architecture
-- [Plugin System](PLUGIN_ARCHITECTURE.md) - Plugin development

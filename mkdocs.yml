@@ -85,7 +85,6 @@ nav:
       - Visualizations: integrations/visualizations.md
   - Development:
       - Architecture: development/architecture.md
-      - Plugin System: development/PLUGIN_ARCHITECTURE.md
       - Contributing: development/contributing.md
       - API Reference: development/api-reference.md
   - About:

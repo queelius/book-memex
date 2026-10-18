@@ -52,7 +52,7 @@ Top-level `book_memex/` mixes a few single-file modules with a handful of packag
 - **`server/static/` + `server/templates/`**: reader assets only (`reader.{js,css,html}`, `reader_error.html`). Everything else the web server needs lives inline in `server.py`.
 - **`exports/`**: one exporter per target. `arkiv.py` (JSONL + `schema.yaml`), `hugo.py`, `jinja_export.py`, `html_library.py` + `html_utils.py` + `templates/`, `opds_export.py`, `echo_export.py`, `multi_facet_export.py`, `symlink_dag.py`, `zip.py`; `base_exporter.py` is the shared ABC.
 - **`views/`**: SICP-style composable DSL (`{select, transform, order}` over `selector` / `predicate` / `transform` / `ordering` primitives) evaluated by `dsl.py` against the library. See the `views/dsl.py` docstring for the grammar; `view_service.py` persists saved views.
-- **`plugins/`, `similarity/`**: plugin registry + hooks; book-similarity utilities (unchanged pre-Phase 1).
+- **`similarity/`**: book-similarity utilities (unchanged pre-Phase 1).
 
 ### Key conventions
 

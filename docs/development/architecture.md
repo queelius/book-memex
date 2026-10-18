@@ -175,10 +175,9 @@ my-library/
 
 ## Extension Points
 
-1. **Plugins** - Use plugin registry in `ebk/plugins/`
-2. **Metadata Extractors** - Add to `integrations/metadata/`
-3. **Export Formats** - Add to `ebk/exports/`
-4. **MCP Tools** - Add tools to `ebk/mcp/server.py`
+1. **Metadata Extractors** - Add to `integrations/metadata/`
+2. **Export Formats** - Add to `ebk/exports/`
+3. **MCP Tools** - Add tools to `ebk/mcp/server.py`
 
 ## See Also
 
