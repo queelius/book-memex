@@ -19,12 +19,14 @@ install(show_locals=True)
 # Initialize Rich Console
 console = Console()
 
-# Configure logging to use Rich's RichHandler
+# Configure logging to use Rich's RichHandler. Logs go to stderr: stdout is
+# reserved for command output, and for `mcp-serve` it is the JSON-RPC channel,
+# where any stray log line corrupts the protocol.
 logging.basicConfig(
     level=logging.INFO,  # Set to INFO by default, DEBUG if verbose
     format="%(message)s",
     datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)]
+    handlers=[RichHandler(console=Console(stderr=True), rich_tracebacks=True)]
 )
 logger = logging.getLogger(__name__)
 
