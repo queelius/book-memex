@@ -298,6 +298,34 @@ class TestUpdateBooks:
         assert book.title == "Partial Success"
 
 
+class TestRecordKinds:
+    """get_record_kinds declares exactly the kinds get_record resolves."""
+
+    def test_keys_match_uri_kinds(self):
+        from book_memex.core.uri import KINDS
+        from book_memex.mcp.tools import get_record_kinds_impl
+
+        assert {k["kind"] for k in get_record_kinds_impl()["kinds"]} == KINDS
+
+    def test_every_declared_kind_resolves(self, populated_library):
+        from sqlalchemy import text
+
+        from book_memex.mcp.tools import (
+            add_marginalia_impl, get_record_impl, get_record_kinds_impl,
+            start_reading_session_impl,
+        )
+
+        session = populated_library.session
+        book = populated_library.get_all_books()[0]
+        add_marginalia_impl(session, book_uris=[book.uri], content="n")
+        start_reading_session_impl(session, book_id=book.id)
+        for k in get_record_kinds_impl()["kinds"]:
+            raw_id = session.execute(
+                text(f'SELECT `{k["id_column"]}` FROM `{k["table"]}` LIMIT 1')
+            ).scalar_one()
+            assert get_record_impl(session, uri=f"book-memex://{k['kind']}/{raw_id}"), k
+
+
 class TestGetRecord:
     """BM-3: get_record resolves book/marginalia/reading URIs (the archive's
     record-resolution contract tool the federation needs)."""

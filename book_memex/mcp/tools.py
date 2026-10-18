@@ -467,6 +467,34 @@ def _book_to_dict(book: Book) -> Dict[str, Any]:
     }
 
 
+def _record_key_columns() -> Dict[str, Any]:
+    """URI kind -> the ORM column holding that kind's raw id.
+
+    The storage side of core.uri.KINDS (which stays SQLAlchemy-free):
+    get_record dispatches on these kinds and get_record_kinds declares them;
+    a test pins the keys to KINDS.
+    """
+    return {
+        "book": Book.unique_id,
+        "marginalia": Marginalia.uuid,
+        "reading": ReadingSession.uuid,
+    }
+
+
+def get_record_kinds_impl() -> Dict[str, Any]:
+    """The record kinds get_record resolves, with tables and id columns."""
+    return {
+        "kinds": [
+            {
+                "kind": kind,
+                "table": column.class_.__tablename__,
+                "id_column": column.property.columns[0].name,
+            }
+            for kind, column in _record_key_columns().items()
+        ]
+    }
+
+
 def get_record_impl(session: Session, *, uri: str) -> Dict[str, Any]:
     """Resolve a book-memex:// URI to its record (the archive's contract
     record-resolution tool).
@@ -479,7 +507,9 @@ def get_record_impl(session: Session, *, uri: str) -> Dict[str, Any]:
     parsed = parse_uri(uri)
     if parsed.kind == "book":
         book = (
-            session.query(Book).filter_by(unique_id=parsed.id).first()
+            session.query(Book)
+            .filter(_record_key_columns()["book"] == parsed.id)
+            .first()
         )
         if book is None:
             raise LookupError(f"Book {uri} not found")

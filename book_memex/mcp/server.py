@@ -45,7 +45,7 @@ def create_mcp_server(library: Library) -> FastMCP:
     from book_memex.mcp.tools import (
         list_marginalia_impl, get_marginalia_impl, add_marginalia_impl,
         update_marginalia_impl, delete_marginalia_impl, restore_marginalia_impl,
-        get_record_impl,
+        get_record_impl, get_record_kinds_impl,
     )
 
     @mcp.tool(
@@ -60,6 +60,17 @@ def create_mcp_server(library: Library) -> FastMCP:
     )
     def get_record(uri: str) -> dict:
         return get_record_impl(library.session, uri=uri)
+
+    @mcp.tool(
+        name="get_record_kinds",
+        description=(
+            "Declare the URI kinds this archive resolves "
+            "(book-memex://<kind>/<id>) and the table and id column backing "
+            "each. Part of the *-memex archive contract."
+        ),
+    )
+    def get_record_kinds() -> dict:
+        return get_record_kinds_impl()
 
     @mcp.tool(
         name="list_marginalia",
