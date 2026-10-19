@@ -3,89 +3,73 @@
 ## Requirements
 
 - Python 3.10 or higher
-- pip package manager
+- pip (or another PEP 517 installer such as `uv`)
 
-## Basic Installation
+## Install from source
 
-Install the core ebk package:
+book-memex is not yet published to PyPI under the `book-memex` name, so install it
+from the GitHub repository:
 
 ```bash
-pip install ebk
+git clone https://github.com/queelius/book-memex.git
+cd book-memex
+python -m venv .venv
+source .venv/bin/activate        # On Windows: .venv\Scripts\activate
+pip install -e ".[all]"          # or: pip install .  for the core only
 ```
 
-## Installation with Optional Features
+This installs two console scripts:
 
-### Web Dashboard
+- `book-memex`: the CLI.
+- `ebk`: a legacy alias for `book-memex` that prints a deprecation notice. It
+  will be removed after v1, so update scripts to call `book-memex`.
+
+## Optional extras
+
+The core install covers the CLI, the Python API, import, and every exporter.
+Some features need extra dependencies:
+
+| Extra | Installs | Needed for |
+|-------|----------|------------|
+| `server` | FastAPI, python-multipart | `book-memex serve` (REST API, OPDS catalog, browser reader) |
+| `mcp` | `mcp`, pydantic | `book-memex mcp-serve` |
+| `similarity` | numpy, scikit-learn | `book-memex book similar` and `Library.find_similar()` |
+| `all` | `server` + `mcp` + `similarity` | everything above |
+| `dev` | pytest, coverage, black, ruff, mypy, pre-commit, plus `all` | running the test suite |
+| `docs` | mkdocs, mkdocs-material, mkdocstrings | building this documentation |
+
 ```bash
-pip install ebk[streamlit]
-```
-
-### Visualization Tools
-```bash
-pip install ebk[viz]
-```
-
-### All Features
-```bash
-pip install ebk[all]
-```
-
-### Development Installation
-```bash
-pip install ebk[dev]
-```
-
-## Installing from Source
-
-1. Clone the repository:
-```bash
-git clone https://github.com/queelius/ebk.git
-cd ebk
-```
-
-2. Create a virtual environment (recommended):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install in development mode:
-```bash
+pip install -e ".[server]"
+pip install -e ".[mcp]"
+pip install -e ".[server,mcp,similarity]"
 pip install -e ".[dev]"
 ```
 
+`serve` itself also needs an ASGI server; if `uvicorn` is not already present in
+your environment, install it with `pip install uvicorn`.
+
 ## Using the Makefile
 
-The project includes a Makefile for common development tasks:
+The repository includes a Makefile for common development tasks:
 
 ```bash
-# Set up complete development environment
-make setup
-
-# Run tests
-make test
-
-# Check code coverage
-make test-coverage
-
-# Format code
-make format
-
-# Run linting
-make lint
+make setup          # create a virtual environment and install dependencies
+make test           # run the test suite
+make test-coverage  # run tests with a coverage report
+make format         # black + isort
+make lint           # linters
+make docs           # build this documentation
 ```
 
-## Verifying Installation
-
-Check that ebk is installed correctly:
+## Verifying the installation
 
 ```bash
-ebk --version
-ebk --help
+book-memex --help
+book-memex about
 ```
 
-## Next Steps
+## Next steps
 
-- Follow the [Quick Start Guide](quickstart.md) to create your first library
-- Read about [Configuration](configuration.md) options
-- Explore the [CLI Reference](../user-guide/cli.md)
+- Follow the [Quick Start Guide](quickstart.md) to create your first library.
+- Read about [Configuration](configuration.md).
+- Explore the [CLI Reference](../user-guide/cli.md).

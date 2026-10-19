@@ -1,40 +1,45 @@
 # Python API
 
-Comprehensive guide to ebk's Python API for programmatic library management.
+book-memex is a regular Python package (`book_memex`). The CLI, the web server, and
+the MCP server are all thin layers over the same `Library` class and services
+described here.
 
 ## Overview
 
-ebk provides a SQLAlchemy-based API for managing ebook libraries. The API features:
+- **`Library`** (`book_memex.library_db`): open a library, add books, search,
+  query, and common personal-metadata operations.
+- **`QueryBuilder`**: a fluent, chainable query interface returned by `lib.query()`.
+- **ORM models** (`book_memex.db.models`): SQLAlchemy models such as `Book`,
+  `Author`, `Subject`, `Tag`, `File`, `PersonalMetadata`, `Marginalia`,
+  `ReadingSession`, `BookContent`, `View`.
+- **Services** (`book_memex.services`): `PersonalMetadataService`,
+  `MarginaliaService`, `ExportService`, `ImportService`, `ViewService`,
+  `ReadingQueueService`, `TextExtractionService`.
+- **URIs** (`book_memex.core.uri`): build and parse `book-memex://` URIs.
 
-- **Fluent Query Builder** for chainable, readable queries
-- **SQLAlchemy ORM Models** (Book, Author, Subject, File, Cover, Tag)
-- **Full-text Search** via SQLite FTS5
-- **Services Layer** for metadata, import/export, and text extraction
-
-## Quick Start
+## Quick start
 
 ```python
 from pathlib import Path
-from ebk.library_db import Library
+from book_memex.library_db import Library
 
-# Open or create a library
-lib = Library.open(Path("~/my-library"))
+# Library.open() creates the library if it does not exist and runs any
+# pending migrations. It does not expand "~", so do that yourself.
+lib = Library.open(Path("~/my-library").expanduser())
 
-# Add a book
 book = lib.add_book(
     Path("book.epub"),
     metadata={
         "title": "Python Programming",
         "creators": ["John Doe"],
         "subjects": ["Programming", "Python"],
-        "language": "en"
-    }
+        "language": "en",
+    },
 )
+print(book.id, book.unique_id, book.uri)   # book.uri -> "book-memex://book/<unique_id>"
 
-# Search for books
 results = lib.search("python")
 
-# Use fluent query builder
 python_books = (lib.query()
     .filter_by_subject("Python")
     .filter_by_language("en")
@@ -42,421 +47,274 @@ python_books = (lib.query()
     .limit(10)
     .all())
 
-# Get statistics
 stats = lib.stats()
 print(f"Total books: {stats['total_books']}")
 
-# Always close when done
 lib.close()
 ```
 
-## Core Classes
-
-### Library
-
-The main entry point for all library operations.
+## `Library`
 
 ```python
-from ebk.library_db import Library
+from book_memex.library_db import Library
 
-# Open existing or create new library
 lib = Library.open(Path("/path/to/library"))
 
-# Basic operations
-book = lib.get_book(book_id)           # Get by ID
-books = lib.get_all_books()            # Get all books
-results = lib.search("query string")   # Full-text search
-stats = lib.stats()                    # Library statistics
+lib.get_book(book_id)                      # Book or None (archived books hidden unless include_archived=True)
+lib.get_book_by_unique_id(unique_id)
+lib.get_all_books(limit=None, offset=0)
+lib.get_books_by_author("Knuth")
+lib.get_books_by_subject("Algorithms")
+lib.search("title:Python rating:>=4", limit=50, offset=0)
+lib.stats()                                # {'total_books', 'total_authors', 'languages', 'formats', ...}
 
 # Adding books
-book = lib.add_book(
-    file_path=Path("book.pdf"),
-    metadata={
-        "title": "My Book",
-        "creators": ["Author Name"],
-        "subjects": ["Topic"],
-        "language": "en",
-        "publisher": "Publisher Name",
-        "publication_date": "2024",
-        "description": "Book description...",
-        "series": "Series Name",
-        "series_index": "1"
-    },
-    extract_text=True,   # Extract text for full-text search
-    extract_cover=True   # Extract cover image
-)
+lib.add_book(file_path, metadata={...}, extract_text=True, extract_cover=True)
+lib.add_calibre_book(Path("/calibre/Author/Book (1)/metadata.opf"))
+lib.batch_import([(Path("a.pdf"), {"title": "A", "creators": ["X"]}),
+                  (Path("b.epub"), {"title": "B", "creators": ["Y"]})])
 
-# Import from Calibre
-book = lib.add_calibre_book(Path("/calibre/book/metadata.opf"))
+# Editing and personal data
+lib.add_tags(book_id, ["to-read"])        # personal tags (see TagService for hierarchical tags)
+lib.remove_tags(book_id, ["to-read"])
+lib.add_subject(book_id, "Algorithms")
+lib.set_favorite(book_id, True)
+lib.update_reading_status(book_id, "reading", progress=30)
 
-# Batch import
-books = lib.batch_import([
-    (Path("book1.pdf"), {"title": "Book 1", "creators": ["Author"]}),
-    (Path("book2.epub"), {"title": "Book 2", "creators": ["Author"]}),
-])
+# Reading queue
+lib.add_to_queue(book_id, position=1)
+lib.get_reading_queue()
+lib.reorder_queue(book_id, new_position=3)
+lib.remove_from_queue(book_id)
 
-# Close when done
+# Reviews and marginalia
+lib.add_review(book_id, "Great book", title="Recommended", rating=5)
+lib.get_reviews(book_id)
+lib.add_marginalia(book_ids=[book_id], content="Note", highlighted_text="...", page_number=12)
+lib.get_marginalia(book_id)
+
+# Deleting (soft by default)
+lib.delete_book(book_id)                   # archive: sets archived_at, URI keeps resolving
+lib.delete_book(book_id, hard=True)        # remove the row (cascades children)
+lib.delete_book(book_id, hard=True, delete_files=True)
+
+# Merging and similarity
+merged, deleted_ids = lib.merge_books(primary_id=1, secondary_ids=[2, 3])
+lib.find_similar(book_id, top_k=10)        # needs the "similarity" extra
+
+# arkiv round trip and the single-file HTML app
+lib.export_arkiv(Path("archive.zip"))      # directory, .zip, or .tar.gz
+lib.import_arkiv(Path("archive.zip"))
+lib.export_html_app(Path("library.html"))
+
 lib.close()
 ```
 
-### QueryBuilder
+`lib.session` is the underlying SQLAlchemy session and `lib.library_path` the
+library directory; services take them as constructor arguments.
 
-Fluent interface for building complex queries.
+## `QueryBuilder`
 
 ```python
-# Start a query
-query = lib.query()
-
-# Filter methods (chainable)
-query = (lib.query()
+books = (lib.query()
+    .filter_by_title("Algorithms")          # substring; exact=True for exact match
     .filter_by_author("Knuth")
     .filter_by_subject("Algorithms")
     .filter_by_language("en")
+    .filter_by_publisher("Addison-Wesley")
     .filter_by_format("pdf")
-    .filter_by_rating(4.0)         # Minimum rating
+    .filter_by_year(1997)
+    .filter_by_rating(4)                     # min_rating, optional max_rating (default 5)
     .filter_by_favorite(True)
-    .filter_by_status("reading")
-    .filter_by_tag("Work/Projects")
-    .filter_by_series("TAOCP"))
+    .filter_by_reading_status("reading")
+    .filter_by_text("recursion")
+    .order_by("title")                       # order_by("created_at", desc=True)
+    .limit(20)
+    .offset(40)
+    .all())
 
-# Ordering
-query = query.order_by("title")              # Ascending
-query = query.order_by("created_at", desc=True)  # Descending
-
-# Pagination
-query = query.limit(20).offset(40)  # Page 3 of 20 results
-
-# Execute query
-books = query.all()           # Get all matching books
-book = query.first()          # Get first match or None
-count = query.count()         # Count matches
-exists = query.exists()       # Check if any match
+lib.query().filter_by_language("en").count()
+lib.query().filter_by_author("Knuth").first()
 ```
 
-### ORM Models
-
-SQLAlchemy models for database entities.
-
-#### Book
+## ORM models
 
 ```python
-from ebk.db.models import Book
+from book_memex.db.models import Book, PersonalMetadata, Marginalia
 
 book = lib.get_book(1)
 
-# Scalar fields
-book.id              # int
-book.unique_id       # str (UUID)
-book.title           # str
-book.subtitle        # Optional[str]
-book.language        # Optional[str]
-book.publisher       # Optional[str]
-book.publication_date # Optional[str]
-book.description     # Optional[str]
-book.series          # Optional[str]
-book.series_index    # Optional[float]
-book.page_count      # Optional[int]
-book.created_at      # datetime
-book.updated_at      # datetime
+# Scalars
+book.id, book.unique_id, book.title, book.subtitle, book.language
+book.publisher, book.publication_date, book.series, book.series_index
+book.description, book.page_count, book.created_at, book.updated_at
+book.archived_at        # None unless soft-deleted
+book.uri                # "book-memex://book/<unique_id>"
 
 # Relationships
-book.authors         # List[Author]
-book.subjects        # List[Subject]
-book.files           # List[File]
-book.covers          # List[Cover]
-book.tags            # List[Tag]
-book.identifiers     # List[Identifier]
-book.personal        # Optional[PersonalMetadata]
-book.annotations     # List[Annotation]
-```
+book.authors, book.subjects, book.tags, book.files, book.covers
+book.identifiers, book.contributors, book.reviews
+book.marginalia, book.sessions          # Marginalia and ReadingSession rows
+book.personal                           # PersonalMetadata or None
 
-#### Author
-
-```python
-author.id      # int
-author.name    # str
-author.books   # List[Book]
-```
-
-#### Subject
-
-```python
-subject.id     # int
-subject.name   # str
-subject.books  # List[Book]
-```
-
-#### Tag
-
-Hierarchical user-defined tags.
-
-```python
-tag.id         # int
-tag.name       # str (leaf name)
-tag.path       # str (e.g., "Work/Projects")
-tag.full_path  # str (complete path)
-tag.parent_id  # Optional[int]
-tag.children   # List[Tag]
-tag.books      # List[Book]
-```
-
-#### File
-
-```python
-file.id         # int
-file.path       # str (relative to library)
-file.format     # str (pdf, epub, etc.)
-file.size_bytes # int
-file.file_hash  # str (SHA256)
-file.book_id    # int
-```
-
-#### PersonalMetadata
-
-User-specific reading data.
-
-```python
 pm = book.personal
-
-pm.rating           # Optional[float] (0-5)
-pm.favorite         # bool
-pm.reading_status   # str (unread, reading, read, abandoned)
-pm.reading_progress # Optional[float] (0-100)
-pm.date_started     # Optional[datetime]
-pm.date_finished    # Optional[datetime]
-pm.personal_tags    # Optional[List[str]]
-pm.queue_position   # Optional[int]
+pm.rating, pm.favorite, pm.reading_status, pm.reading_progress
+pm.date_started, pm.date_finished, pm.queue_position, pm.progress_anchor
 ```
+
+Hierarchical tags are managed with `book_memex.services.tag_service.TagService`
+(`add_tag_to_book(book, "Work/Projects")`, `get_books_with_tag(path, include_subtags=True)`,
+`rename_tag`, `delete_tag`). `Tag` rows are hierarchical (`tag.name`, `tag.path` such as `Work/Projects`,
+`tag.parent`, `tag.children`). `File` rows carry `path` (relative to the library),
+`format`, `size_bytes`, and `file_hash` (SHA-256).
 
 ## Services
 
 ### PersonalMetadataService
 
-Manage reading status, ratings, and favorites.
+```python
+from book_memex.services import PersonalMetadataService
+
+pm = PersonalMetadataService(lib.session)
+pm.set_rating(book_id, 4.5)
+pm.set_favorite(book_id, True)
+pm.set_reading_status(book_id, "reading")      # unread, reading, read, abandoned
+pm.update_progress(book_id, 45)
+pm.get_favorites()
+pm.get_by_status("reading")
+pm.get_by_rating(4.0)
+```
+
+### MarginaliaService
 
 ```python
-from ebk.services import PersonalMetadataService
+from book_memex.services import MarginaliaService
 
-pm_svc = PersonalMetadataService(lib.session)
+ms = MarginaliaService(lib.session, lib.library_path)
+note = ms.create(content="Key insight", highlighted_text="...",
+                 book_ids=[book_id], page_number=12)
+note.uri      # "book-memex://marginalia/<uuid>"
+note.scope    # "highlight" (one book + location); also book_note,
+              # collection_note (no books), cross_book_note (2+ books)
 
-# Ratings
-pm_svc.set_rating(book_id, 4.5)
-rating = pm_svc.get_rating(book_id)
-
-# Favorites
-pm_svc.set_favorite(book_id, True)
-favorites = pm_svc.get_favorites()
-
-# Reading status
-pm_svc.set_reading_status(book_id, "reading")
-pm_svc.set_reading_progress(book_id, 45.0)
-currently_reading = pm_svc.get_by_status("reading")
+ms.list_for_book(book_id, scope="highlight")
+ms.get_by_uuid(note.uuid)
+ms.archive(note)        # soft delete
+ms.restore(note)
 ```
 
 ### ExportService
 
-Export library data in various formats.
-
 ```python
-from ebk.services import ExportService
+from book_memex.services import ExportService
 
 export_svc = ExportService(lib.session, lib.library_path)
+books = lib.query().filter_by_language("en").all()
 
-# JSON export
 json_str = export_svc.export_json(books, pretty=True)
-
-# CSV export
 csv_str = export_svc.export_csv(books)
-
-# Goodreads CSV (for import into Goodreads)
 goodreads_csv = export_svc.export_goodreads_csv(books)
-
-# Calibre CSV
 calibre_csv = export_svc.export_calibre_csv(books)
-
-# HTML catalog
 export_svc.export_html(books, Path("catalog.html"))
-
-# OPDS catalog
 export_svc.export_opds(books, Path("catalog.xml"))
 ```
 
+OPDS export currently imports FastAPI (it shares code with the server's live
+OPDS catalog), so it needs the `server` extra installed.
+
 ### ViewService
 
-Manage named views — composable, non-destructive lenses over the library.
+Views are named, composable, non-destructive lenses over the library.
 
 ```python
-from ebk.views import ViewService
+from book_memex.views import ViewService
 
 view_svc = ViewService(lib.session)
 
-# Create a view using the Views DSL
 view_svc.create(
-    name="favorites",
+    name="loved",
     definition={
         "select": {"filter": {"favorite": True}},
-        "order": {"by": "rating", "desc": True}
+        "order": {"by": "title"},
     },
-    description="All favorite books, sorted by rating"
+    description="Books I marked as favorites",
 )
 
-# Compose views with set operations
 view_svc.create(
     name="english-favorites",
     definition={
         "select": {
             "intersect": [
-                {"view": "favorites"},
-                {"filter": {"language": "en"}}
+                {"view": "loved"},
+                {"filter": {"language": "en"}},
             ]
         }
-    }
+    },
 )
 
-# List views
-views = view_svc.list()
-
-# Evaluate a view (get matching TransformedBook objects)
-books = view_svc.evaluate("favorites")
-
-# Delete a view
-view_svc.delete("favorites")
+view_svc.list()                         # includes built-in views
+books = view_svc.evaluate("loved")      # list of TransformedBook
+view_svc.count("loved")
+view_svc.export_yaml("loved")
+view_svc.delete("english-favorites")
 ```
 
-The Views DSL supports selectors (`all`, `none`, `filter`, `ids`, `view`, `union`, `intersect`, `difference`, `sql`), transforms (`identity`, `override`, `compose`), and orderings (`by`, `custom`, `then`).
+Built-in views (`all`, `favorites`, `reading`, `completed`, `unread`, `recent`,
+`top-rated`) are always available and their names are reserved, so
+`create()` refuses them.
+
+Selectors include `all`, `none`, `filter`, `ids`, `view`, `union`, `intersect`,
+`difference`, and `sql`; see the docstring of `book_memex/views/dsl.py` for the
+full grammar.
+
+## URIs
+
+```python
+from book_memex.core.uri import build_book_uri, parse_uri
+
+uri = build_book_uri(book.unique_id)       # "book-memex://book/<unique_id>"
+parsed = parse_uri("book-memex://book/abc#page=47")
+parsed.kind, parsed.id, parsed.fragment    # ("book", "abc", "page=47")
+```
 
 ## Search
 
-### Simple Search
+`Library.search()` accepts the same syntax as `book-memex query search`
+(field searches, `OR`, `NOT`, phrases, and `rating:` comparisons); see
+[Search & Query](search.md).
 
 ```python
-# Search across title, authors, subjects, description
-results = lib.search("python programming")
-
-# Returns list of Book objects
-for book in results:
-    print(f"{book.title} by {', '.join(a.name for a in book.authors)}")
+for book in lib.search('author:Knuth rating:>=4'):
+    print(book.title, ", ".join(a.name for a in book.authors))
 ```
 
-### Advanced Search Syntax
-
-The search parser supports field-specific queries:
+## Example: a reading dashboard
 
 ```python
-# Field-specific search
-results = lib.search("title:Python")
-results = lib.search("author:Knuth")
-results = lib.search("subject:Algorithms")
-results = lib.search("language:en")
+from pathlib import Path
+from book_memex.library_db import Library
+from book_memex.services import PersonalMetadataService
 
-# Comparisons
-results = lib.search("rating:>=4")
-results = lib.search("year:2020")
+lib = Library.open(Path("~/library").expanduser())
+pm = PersonalMetadataService(lib.session)
 
-# Boolean operators
-results = lib.search("Python AND Django")
-results = lib.search("Python OR Ruby")
-results = lib.search("Python NOT beginner")
-
-# Phrases
-results = lib.search('"machine learning"')
-
-# Combined
-results = lib.search('author:Knuth subject:Algorithms rating:>=4')
-```
-
-## Book Operations
-
-### Merging Duplicate Books
-
-```python
-# Merge books 2 and 3 into book 1
-merged_book, deleted_ids = lib.merge_books(
-    primary_id=1,
-    secondary_ids=[2, 3],
-    delete_secondary_files=False  # Keep duplicate files
-)
-```
-
-### Finding Similar Books
-
-```python
-from ebk.similarity import find_similar_books
-
-similar = find_similar_books(
-    lib.session,
-    book_id=1,
-    limit=10,
-    mode="hybrid"  # or "text", "metadata"
-)
-
-for book, score in similar:
-    print(f"{book.title}: {score:.2f}")
-```
-
-## Real-World Examples
-
-### Building a Reading Dashboard
-
-```python
-from ebk.library_db import Library
-from ebk.services import PersonalMetadataService
-
-lib = Library.open(Path("~/library"))
-pm_svc = PersonalMetadataService(lib.session)
-
-# Get reading statistics
-currently_reading = pm_svc.get_by_status("reading")
-completed_this_year = lib.query().filter_by_status("read").all()
-favorites = pm_svc.get_favorites()
-
-print(f"Currently reading: {len(currently_reading)} books")
-print(f"Completed: {len(completed_this_year)} books")
-print(f"Favorites: {len(favorites)} books")
+print("Currently reading:", len(pm.get_by_status("reading")))
+print("Finished:", lib.query().filter_by_reading_status("read").count())
+print("Favorites:", len(pm.get_favorites()))
 
 lib.close()
 ```
 
-### Batch Tagging
+## Best practices
 
-```python
-# Add tag to all Python books
-python_books = lib.query().filter_by_subject("Python").all()
+1. Always `lib.close()` when done to release the database connection.
+2. Expand `~` yourself: `Path("~/library").expanduser()`.
+3. Prefer `QueryBuilder` or the services over raw SQL for writes.
+4. Many fields are optional; handle `None`.
 
-for book in python_books:
-    lib.add_tag_to_book(book.id, "Programming/Python")
+## Further reading
 
-lib.session.commit()
-```
-
-### Export for Backup
-
-```python
-from ebk.services import ExportService
-
-lib = Library.open(Path("~/library"))
-export_svc = ExportService(lib.session, lib.library_path)
-
-# Export all books to JSON
-all_books = lib.get_all_books()
-json_backup = export_svc.export_json(all_books, pretty=True)
-
-with open("library_backup.json", "w") as f:
-    f.write(json_backup)
-
-lib.close()
-```
-
-## Best Practices
-
-1. **Always close the library** when done to release database connections
-2. **Use context managers** where possible for automatic cleanup
-3. **Commit changes** after modifications: `lib.session.commit()`
-4. **Use QueryBuilder** for complex queries instead of raw SQL
-5. **Handle missing fields** gracefully (many fields are Optional)
-
-## Further Reading
-
-- [CLI Reference](cli.md) - Command-line interface
-- [Search & Query](search.md) - Advanced search syntax
-- [Import/Export](import-export.md) - Data interchange formats
+- [CLI Reference](cli.md)
+- [Search & Query](search.md)
+- [Import/Export](import-export.md)
+- [API Reference](../development/api-reference.md)

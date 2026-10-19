@@ -1,6 +1,47 @@
 # Changelog
 
-Project changelog and release notes.
+Project changelog and release notes. Entries before the April 2026 rename refer
+to the project by its old name, `ebk`, and use the command names of that time;
+many of those commands have since been renamed or removed (see the
+[CLI Reference](../user-guide/cli.md) for the current surface).
+
+## Unreleased: book-memex (2026-04 onward)
+
+### Rename
+
+- `ebk` was renamed to **book-memex**: package `book_memex`, console script
+  `book-memex`, GitHub repository `queelius/book-memex`. The `ebk` command remains
+  as a deprecation shim until after v1. The config file stays at
+  `~/.config/ebk/config.json`.
+
+### memex ecosystem integration
+
+- URI-addressable records (`book-memex://book/...`, `.../marginalia/...`,
+  `.../reading/...`) with position fragments.
+- Soft delete (`archived_at`) across record tables; `book delete` archives by
+  default, `--hard` opts into physical deletion.
+- Marginalia (highlights, book notes, cross-book notes, collection notes) and
+  reading sessions over REST and MCP.
+- Per-segment content extraction (`book_content`, `book_content_fts`), content
+  search endpoints and MCP tools, `extract`, `reindex-content`, and
+  `reindex-metadata` commands.
+- Browser EPUB/PDF reader at `/read/{book_id}` with vendored reader libraries.
+- arkiv export/import (`export arkiv`, `import arkiv`) using the `arkiv` package's
+  bundle I/O, and the single-file `export html-app`.
+- MCP `get_record` and `get_record_kinds` (record-resolution contract), plus
+  marginalia, reading, and content-search tools.
+- `serve` binds loopback by default and requires `--allow-remote` otherwise.
+
+## v0.5.1 (2026-03-13)
+
+- Code quality fixes for the MCP module.
+
+## v0.5.0 (2026-03-13)
+
+- Added the MCP server (`ebk mcp-serve`) with `get_schema`, `execute_sql`, and
+  `update_books`.
+- Removed the AI/LLM layer (including `ebk enrich`), the interactive REPL shell,
+  the VFS module, and the skills system, all superseded by MCP and the REST API.
 
 ## v0.4.5 (2026-03-10)
 
@@ -150,4 +191,4 @@ Project changelog and release notes.
 
 ## Earlier Versions
 
-See [GitHub Releases](https://github.com/queelius/ebk/releases) for information about earlier versions.
+See [GitHub Releases](https://github.com/queelius/book-memex/releases) for information about earlier versions.

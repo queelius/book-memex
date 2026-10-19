@@ -1,57 +1,62 @@
 # API Reference
 
-Complete API reference documentation for ebk developers.
+The main modules of the `book_memex` package. See the
+[Python API guide](../user-guide/api.md) for usage examples.
 
-## Core Modules
+## `book_memex.library_db`
 
-### ebk.library_db
-
-The main `Library` class for all library operations.
+`Library` (the entry point: `Library.open(path)`) and `QueryBuilder` (returned by
+`lib.query()`).
 
 ```python
-from ebk.library_db import Library
+from book_memex.library_db import Library
 ```
 
-See [Python API Guide](../user-guide/api.md) for usage examples.
+## `book_memex.db.models`
 
-### ebk.db.models
+SQLAlchemy ORM models: `Book`, `Author`, `Subject`, `Contributor`, `Identifier`,
+`File`, `Cover`, `Tag`, `PersonalMetadata`, `Review`, `Marginalia`,
+`ReadingSession`, `BookContent` (per-segment text), `ExtractedText`, `View`,
+`ViewOverride`. Record models expose a `uri` property and an `archived_at` column.
 
-SQLAlchemy ORM models:
+## `book_memex.services`
 
-- `Book` - Main book entity
-- `Author` - Author model
-- `Subject` - Subject/category model
-- `Tag` - Hierarchical user tags
-- `File` - Ebook file records
-- `Cover` - Cover images
-- `PersonalMetadata` - Reading status, ratings
-- `Identifier` - ISBN, DOI, etc.
-- `Annotation` - Notes and highlights
+- `ImportService`: book import and metadata extraction
+- `ExportService`: JSON, CSV, Goodreads CSV, Calibre CSV, HTML, OPDS
+- `PersonalMetadataService`: ratings, favorites, reading status and progress
+- `MarginaliaService`: notes and highlights (create, list, archive, restore)
+- `ReadingQueueService`: the reading queue
+- `ViewService`: saved views
+- `TextExtractionService`: full-text extraction
 
-### ebk.services
+Further modules: `services.reading_session_service.ReadingSessionService`,
+`services.tag_service.TagService`, `services.content_indexer`,
+`services.arkiv_import`, `services.annotation_extraction`.
 
-Service layer modules:
+## `book_memex.core`
 
-- `ImportService` - Book import and metadata extraction
-- `ExportService` - Export to JSON, CSV, HTML, OPDS
-- `PersonalMetadataService` - Ratings, favorites, reading status
-- `TextExtractionService` - Full-text extraction
+- `core.uri`: `build_book_uri`, `build_marginalia_uri`, `build_reading_uri`,
+  `build_book_fragment_uri`, `parse_uri` (returns `ParsedUri(scheme, kind, id, fragment)`).
+- `core.soft_delete`: `filter_active`, `archive`, `restore`, `hard_delete`.
+- `core.fts`: `safe_fts_query` (always route user FTS5 input through it).
 
-### ebk.views
+## `book_memex.views`
 
-View DSL for saved queries:
+`ViewService`, `ViewEvaluator`, `TransformedBook`; the DSL grammar is documented
+in `book_memex/views/dsl.py`.
 
-- `ViewService` - Create, list, evaluate views
-- View DSL parser and compiler
+## `book_memex.mcp`
 
-### ebk.similarity
+`create_mcp_server(library)` and `run_server(library_path)` in `mcp.server`;
+tool implementations in `mcp.tools`; `ReadOnlySQLExecutor` in `mcp.sql_executor`.
+See [MCP Server](../integrations/mcp.md).
 
-Book similarity and recommendations:
+## `book_memex.similarity`
 
-- `find_similar_books()` - Find similar books
-- TF-IDF and metadata-based similarity
+`BookSimilarity` plus feature extractors and metrics (requires the `similarity`
+extra). `Library.find_similar()` is the convenient entry point.
 
-## See Also
+## See also
 
-- [Python API Guide](../user-guide/api.md) - Detailed API usage
-- [Architecture](architecture.md) - System architecture
+- [Python API Guide](../user-guide/api.md)
+- [Architecture](architecture.md)

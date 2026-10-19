@@ -1,591 +1,179 @@
-# Web Server
+# Web Server and Reader
 
-ebk includes a FastAPI-based web server that provides a modern web interface for browsing and managing your ebook library.
+`book-memex serve` starts a FastAPI application that provides:
 
-## Quick Start
+- a single-page **library UI** at `/` for browsing, filtering, editing, and importing,
+- a **browser reader** for EPUB and PDF at `/read/{book_id}`,
+- a **REST API** under `/api/...`,
+- a live **OPDS 1.2 catalog** under `/opds/` for e-reader apps.
 
-### Basic Usage
+It requires the `server` extra and an ASGI server (`pip install -e ".[server]" uvicorn`).
 
-Start the server with default settings:
-
-```bash
-ebk serve ~/my-library
-```
-
-The server will start at `http://localhost:8000` (or the configured host/port).
-
-### Custom Host and Port
+## Starting the server
 
 ```bash
-# Listen on specific port
-ebk serve ~/library --port 8080
-
-# Localhost only (more secure)
-ebk serve ~/library --host 127.0.0.1 --port 8000
-
-# Listen on all interfaces (network access)
-ebk serve ~/library --host 0.0.0.0 --port 8000
+book-memex serve ~/my-library            # http://127.0.0.1:8000
+book-memex serve ~/my-library --port 8080
+book-memex serve                          # uses library.default_path from the config
+book-memex serve --reload                 # auto-reload (development)
+book-memex serve ~/my-library --no-open   # never open a browser tab
 ```
 
-### Auto-Open Browser
+| Option | Meaning |
+|--------|---------|
+| `--host` | Bind address (default from config: `127.0.0.1`). |
+| `--port` | Port (default from config: `8000`). |
+| `--reload` | Auto-reload on code changes. |
+| `--no-open` | Do not open a browser, even if `server.auto_open_browser` is set. |
+| `--allow-remote` | Permit binding a non-loopback host. |
+
+Defaults come from `~/.config/ebk/config.json`; set them with
+`book-memex config --server-host ... --server-port ... --server-auto-open`.
+
+## Security: loopback by default
+
+The REST API is **unauthenticated** and includes destructive routes (book
+deletion with file unlinking, metadata writes, uploads). The server therefore
+refuses to bind anything other than `127.0.0.1`, `localhost`, or `::1` unless you
+pass `--allow-remote`, and it prints a warning when you do:
 
 ```bash
-# Open browser automatically
-ebk serve ~/library --auto-open
-
-# Or configure as default
-ebk config set server.auto_open_browser true
-ebk serve ~/library
+book-memex serve ~/my-library --host 0.0.0.0 --allow-remote
 ```
 
-## Configuration
+Only do this on a trusted network. For access from elsewhere, keep the server on
+loopback and put an authenticating reverse proxy, SSH tunnel, or VPN in front of it.
 
-Configure server defaults in `~/.config/ebk/config.json`:
+CORS is restricted to `http://localhost:8000`, `http://127.0.0.1:8000`,
+`http://localhost:3000`, and `http://127.0.0.1:3000`.
 
-```bash
-# Set default port
-ebk config set server.port 8080
+## Browser reader
 
-# Set default host
-ebk config set server.host 0.0.0.0
+Open `http://127.0.0.1:8000/read/{book_id}` (or use "Open in reader" in the book
+detail view).
 
-# Enable auto-open
-ebk config set server.auto_open_browser true
+- **Formats**: EPUB (EPUB.js) and PDF (PDF.js). DRM-protected books cannot be rendered.
+- **Highlights**: selecting text creates a highlight, stored as
+  [marginalia](library-management.md#marginalia) via `POST /api/marginalia`.
+- **Progress**: the reading position (CFI or page) and percentage are synced to
+  `PATCH /api/reading/progress`, and reading sessions are recorded.
+- **Themes**: light, dark, and sepia (remembered per browser).
+- **Navigation**: table of contents sidebar, page buttons, keyboard shortcuts,
+  and bookmarkable URL fragments.
+- **No CDN**: EPUB.js, JSZip, PDF.js, and the PDF.js worker are vendored and
+  served from `/static/vendor/`, so the server needs no internet access.
 
-# Set page size
-ebk config set server.page_size 50
-```
-
-View current configuration:
-
-```bash
-ebk config show --section server
-```
-
-## Web Interface Features
-
-### Book Browsing
-
-The web interface provides:
-
-- **Grid view** with book covers
-- **List view** with detailed information
-- **Pagination** for large libraries
-- **Sorting** by title, author, date, rating
-- **Filtering** by author, language, format, rating, tags
-
-### Navigation
-
-Use URL parameters for direct navigation:
-
-```
-# Pagination
-http://localhost:8000/?page=2
-
-# Filtering
-http://localhost:8000/?author=Knuth
-http://localhost:8000/?language=en
-http://localhost:8000/?format=pdf
-
-# Sorting
-http://localhost:8000/?sort_by=title
-http://localhost:8000/?sort_by=date&sort_order=desc
-
-# Combine filters
-http://localhost:8000/?author=Knuth&language=en&sort_by=title
-```
-
-### Search
-
-Full-text search across title, author, and description:
-
-```
-http://localhost:8000/search?q=python+programming
-```
-
-### Book Details
-
-Click on any book to view:
-
-- Complete metadata
-- All available formats
-- Cover image
-- Description
-- Authors and subjects
-- Reading status and rating
-- Personal tags and notes
-
-### File Access
-
-Click on format badges to:
-
-- **Open files** directly in browser (PDF)
-- **Download files** (EPUB, MOBI, etc.)
-- **View cover** in full size
+Known limitations: PDF highlights are stored but not yet re-painted as overlays;
+mobile touch handling works but is not polished; there is no offline (service
+worker) mode, so the browser must reach the running server.
 
 ## REST API
 
-The server provides a REST API for programmatic access.
+FastAPI serves interactive documentation of every endpoint and schema at
+`/docs` (Swagger UI) and `/redoc`. The main groups:
 
-### Endpoints
+### Books
 
-#### List Books
+| Method and path | Purpose |
+|-----------------|---------|
+| `GET /api/books` | Paginated list. Query parameters: `limit`, `offset`, `search`, `author`, `subject`, `language`, `favorite`, `reading_status`, `format_filter`, `sort`, `order`, `rating` (minimum). |
+| `GET /api/books/{id}` | One book. |
+| `PATCH /api/books/{id}` | Update `title`, `subtitle`, `language`, `publisher`, `publication_date`, `description`, `rating`, `favorite`, `reading_status`, `tags`. |
+| `DELETE /api/books/{id}` | Soft delete (archive) by default; `?hard=true` removes the row; `?delete_files=true` also unlinks files. |
+| `GET /api/books/{id}/files/{format}` | Download a file. |
+| `GET /api/books/{id}/cover` | Cover image. |
+| `GET /api/stats` | Library statistics. |
+| `GET /api/search?q=...` | Search with the [search syntax](search.md). |
 
-```bash
-# Get all books (paginated)
-curl http://localhost:8000/api/books
-
-# With filters
-curl "http://localhost:8000/api/books?author=Knuth&language=en"
-
-# With pagination
-curl "http://localhost:8000/api/books?page=2&limit=50"
-```
-
-Response:
-
-```json
-{
-  "books": [
-    {
-      "id": 1,
-      "title": "The Art of Computer Programming, Vol. 1",
-      "authors": ["Donald E. Knuth"],
-      "language": "en",
-      "publisher": "Addison-Wesley",
-      "publication_date": "1997-07-23",
-      "subjects": ["Computer Science", "Algorithms"],
-      "files": [
-        {"format": "pdf", "size": 15728640, "path": "..."}
-      ],
-      "rating": 5.0,
-      "favorite": true,
-      "reading_status": "read",
-      "tags": ["must-read", "reference"]
-    }
-  ],
-  "total": 150,
-  "page": 1,
-  "limit": 50
-}
-```
-
-#### Get Book Details
+`GET /api/books` returns `{"items": [...], "total": N, "offset": 0, "limit": 50}`.
 
 ```bash
-# Get specific book
-curl http://localhost:8000/api/books/42
-```
-
-Response:
-
-```json
-{
-  "id": 42,
-  "title": "Introduction to Algorithms",
-  "subtitle": "Third Edition",
-  "authors": ["Cormen", "Leiserson", "Rivest", "Stein"],
-  "language": "en",
-  "publisher": "MIT Press",
-  "publication_date": "2009-07-31",
-  "series": null,
-  "series_index": null,
-  "description": "Comprehensive algorithms textbook...",
-  "subjects": ["Algorithms", "Computer Science", "Data Structures"],
-  "files": [
-    {"format": "pdf", "size": 20971520, "path": "files/ab/abc123.pdf"},
-    {"format": "epub", "size": 10485760, "path": "files/cd/cde456.epub"}
-  ],
-  "rating": 5.0,
-  "favorite": true,
-  "reading_status": "reading",
-  "tags": ["textbook", "algorithms", "must-read"],
-  "cover_path": "covers/ab/abc123.jpg"
-}
-```
-
-#### Search Books
-
-```bash
-# Full-text search
-curl "http://localhost:8000/api/search?q=machine+learning"
-```
-
-#### Update Book
-
-```bash
-# Update book metadata
-curl -X PATCH http://localhost:8000/api/books/42 \
+curl "http://127.0.0.1:8000/api/books?author=Knuth&language=en&limit=20"
+curl -X PATCH http://127.0.0.1:8000/api/books/42 \
   -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "favorite": true,
-    "reading_status": "read",
-    "tags": ["must-read", "reference"]
-  }'
+  -d '{"rating": 5, "favorite": true, "reading_status": "reading"}'
 ```
 
-#### Upload Book
+### Imports
+
+`POST /api/books/import` (multipart upload with a `file` field),
+`/api/books/import/folder`, `/api/books/import/calibre`,
+`/api/books/import/url`, `/api/books/import/opds`, `/api/books/import/isbn`.
 
 ```bash
-# Import new book
-curl -X POST http://localhost:8000/api/books \
-  -F "file=@book.pdf" \
-  -F "title=My Book" \
-  -F "authors=Author Name"
+curl -X POST http://127.0.0.1:8000/api/books/import -F "file=@book.pdf"
 ```
 
-#### Get Statistics
+### Content search
 
-```bash
-# Library statistics
-curl http://localhost:8000/api/stats
-```
+| Method and path | Purpose |
+|-----------------|---------|
+| `GET /api/books/{id}/search?q=...` | FTS5 search inside one book's segments. |
+| `GET /api/search/content?q=...` | FTS5 search across all segments. |
 
-Response:
+Hits include a snippet, the segment anchor, and a URI fragment.
 
-```json
-{
-  "total_books": 250,
-  "total_authors": 180,
-  "total_subjects": 45,
-  "total_files": 320,
-  "total_size_mb": 15360.5,
-  "languages": ["en", "de", "fr"],
-  "formats": ["pdf", "epub", "mobi"]
-}
-```
+### Marginalia and reading
 
-### API Authentication
+| Method and path | Purpose |
+|-----------------|---------|
+| `POST /api/marginalia` | Create a note/highlight (0, 1, or many books). |
+| `GET /api/marginalia?book_id=...` | List (archived excluded by default). |
+| `GET/PATCH/DELETE /api/marginalia/{uuid}` | Read, edit, archive (`?hard=true` to delete). |
+| `POST /api/marginalia/{uuid}/restore` | Un-archive. |
+| `POST /api/reading/sessions/start`, `POST /api/reading/sessions/{uuid}/end` | Record a reading session. |
+| `GET /api/reading/sessions`, `DELETE /api/reading/sessions/{uuid}`, `POST /api/reading/sessions/{uuid}/restore` | List, archive, restore sessions. |
+| `GET/POST/PATCH /api/reading/progress` | Read or set progress. `POST` rejects backward progress with `409 Conflict`; `PATCH` always wins. |
 
-Currently the API is open (no authentication). For production use, consider:
+### Views
 
-1. **Reverse proxy** with authentication (nginx, Apache)
-2. **VPN** for secure access
-3. **Firewall rules** to restrict access
+`GET/POST /api/views`, `GET/PATCH/DELETE /api/views/{name}`,
+`GET /api/views/{name}/books`, `POST/DELETE /api/views/{name}/books/{book_id}`,
+`PUT/DELETE /api/views/{name}/overrides/{book_id}`, `GET /api/views/{name}/yaml`,
+`POST /api/views/import`.
 
-Future versions will support API keys and OAuth.
+## OPDS catalog
 
-## Network Access
+The server publishes a live OPDS 1.2 catalog that e-reader apps (KOReader,
+Foliate, Moon+ Reader, ...) can browse: point the app at
+`http://<host>:8000/opds/`. Feeds include `/opds/all`, `/opds/recent`,
+`/opds/search`, `/opds/authors`, `/opds/subjects`, `/opds/languages`, with
+download and cover links. For a static catalog instead, use
+`book-memex export opds`.
 
-### Local Access Only
-
-For security, bind to localhost:
-
-```bash
-ebk serve ~/library --host 127.0.0.1
-```
-
-Access from same machine only: `http://localhost:8000`
-
-### LAN Access
-
-To access from other devices on your network:
-
-```bash
-ebk serve ~/library --host 0.0.0.0 --port 8000
-```
-
-Find your IP address:
-
-```bash
-# Linux/Mac
-ifconfig | grep inet
-
-# Windows
-ipconfig
-```
-
-Access from other devices: `http://your-ip:8000`
-
-### Public Access (Not Recommended)
-
-For internet access, use a reverse proxy with authentication:
-
-```nginx
-# nginx configuration
-server {
-    listen 80;
-    server_name books.example.com;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-
-        # Basic authentication
-        auth_basic "eBook Library";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-    }
-}
-```
-
-## Production Deployment
-
-### Using systemd (Linux)
-
-Create service file: `/etc/systemd/system/ebk-server.service`
+## Running as a service (systemd)
 
 ```ini
+# ~/.config/systemd/user/book-memex.service
 [Unit]
-Description=ebk Web Server
-After=network.target
+Description=book-memex web server
 
 [Service]
-Type=simple
-User=your-username
-WorkingDirectory=/home/your-username
-ExecStart=/home/your-username/.local/bin/ebk serve /home/your-username/library --host 0.0.0.0 --port 8000
+ExecStart=%h/.local/bin/book-memex serve %h/my-library --no-open
 Restart=on-failure
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
-
-Enable and start:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable ebk-server
-sudo systemctl start ebk-server
-sudo systemctl status ebk-server
+systemctl --user daemon-reload
+systemctl --user enable --now book-memex
 ```
 
-### Using Docker
-
-Create `Dockerfile`:
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install ebk
-RUN pip install ebk
-
-# Expose port
-EXPOSE 8000
-
-# Mount library as volume
-VOLUME ["/library"]
-
-# Start server
-CMD ["ebk", "serve", "/library", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-Build and run:
-
-```bash
-# Build image
-docker build -t ebk-server .
-
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -v ~/my-library:/library \
-  --name ebk \
-  ebk-server
-
-# View logs
-docker logs -f ebk
-```
-
-### Using docker-compose
-
-Create `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  ebk:
-    image: ebk-server
-    build: .
-    ports:
-      - "8000:8000"
-    volumes:
-      - ~/my-library:/library:ro
-    restart: unless-stopped
-    environment:
-      - EBK_HOST=0.0.0.0
-      - EBK_PORT=8000
-```
-
-Start:
-
-```bash
-docker-compose up -d
-```
-
-## Security Considerations
-
-### File System Access
-
-The web server requires:
-
-- **Read access** to library files
-- **Write access** for uploads and metadata updates
-- **Execute access** for opening files
-
-Set appropriate permissions:
-
-```bash
-# Set library ownership
-chown -R your-username:your-username ~/library
-
-# Set secure permissions
-chmod -R 755 ~/library/files
-chmod 644 ~/library/library.db
-```
-
-### Network Security
-
-1. **Firewall**: Only allow access from trusted networks
-   ```bash
-   # Allow from local network only
-   sudo ufw allow from 192.168.1.0/24 to any port 8000
-   ```
-
-2. **HTTPS**: Use reverse proxy with SSL/TLS for production
-
-3. **Authentication**: Implement via reverse proxy or VPN
-
-### File Uploads
-
-If allowing uploads:
-
-1. **Validate file types** (only ebooks)
-2. **Limit file size** (prevent DoS)
-3. **Scan for malware** if accepting external files
-4. **Use dedicated upload directory** with restricted permissions
+Adjust `ExecStart` to wherever `book-memex` is installed (for example a
+virtual environment's `bin/`).
 
 ## Troubleshooting
 
-### Port Already in Use
+- **Port in use**: `lsof -i :8000`, then `book-memex serve ~/my-library --port 8080`.
+- **"Refusing to bind"**: you asked for a non-loopback host without `--allow-remote`.
+- **"uvicorn is not installed"**: `pip install uvicorn`.
+- **Search misses a book by title**: rebuild the metadata index with
+  `book-memex reindex-metadata --all -L ~/my-library` (see [Search](search.md)).
 
-If port 8000 is already used:
+## Next steps
 
-```bash
-# Check what's using the port
-lsof -i :8000
-
-# Use different port
-ebk serve ~/library --port 8080
-```
-
-### Permission Denied
-
-If server can't read library:
-
-```bash
-# Check permissions
-ls -la ~/library
-
-# Fix permissions
-chmod -R 755 ~/library
-```
-
-### Can't Access from Network
-
-If other devices can't connect:
-
-1. **Check firewall**:
-   ```bash
-   sudo ufw status
-   sudo ufw allow 8000
-   ```
-
-2. **Verify host binding**:
-   ```bash
-   # Must be 0.0.0.0 for network access
-   ebk serve ~/library --host 0.0.0.0
-   ```
-
-3. **Check network**:
-   ```bash
-   # Test from other device
-   ping your-ip
-   telnet your-ip 8000
-   ```
-
-### Slow Performance
-
-If web interface is slow:
-
-1. **Check database size**:
-   ```bash
-   du -h ~/library/library.db
-   ```
-
-2. **Optimize database**:
-   ```bash
-   sqlite3 ~/library/library.db "VACUUM;"
-   ```
-
-3. **Reduce page size**:
-   ```bash
-   ebk config set server.page_size 20
-   ```
-
-4. **Generate thumbnails** for faster loading:
-   ```bash
-   ebk generate-thumbnails ~/library
-   ```
-
-## Advanced Configuration
-
-### Custom Static Files
-
-Serve additional static files:
-
-```python
-from fastapi.staticfiles import StaticFiles
-from ebk.server import app
-
-# Mount custom static directory
-app.mount("/static", StaticFiles(directory="/path/to/static"), name="static")
-```
-
-### Custom Templates
-
-Override default templates:
-
-```python
-from fastapi.templating import Jinja2Templates
-
-templates = Jinja2Templates(directory="/path/to/templates")
-```
-
-### CORS Configuration
-
-By default, the server restricts CORS to localhost origins (`localhost:8000`, `127.0.0.1:8000`, `localhost:3000`, `127.0.0.1:3000`) for security. This prevents external websites from making authenticated requests to your local library.
-
-To add custom origins for a frontend app on a different port:
-
-```python
-from ebk.server import app
-from fastapi.middleware.cors import CORSMiddleware
-
-# Replace the default CORS middleware with custom origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://localhost:3000",
-        "http://localhost:5173",  # e.g., Vite dev server
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
-!!! warning
-    Never use `allow_origins=["*"]` with `allow_credentials=True` — this allows any website to make authenticated requests to your library API.
-
-## Next Steps
-
-- [Configuration Guide](../getting-started/configuration.md) - Configure server defaults
-- [CLI Reference](cli.md) - All server options
-- [Python API](api.md) - Programmatic server control
-- [Python API Documentation](api.md) - Complete API reference
+- [Configuration Guide](../getting-started/configuration.md)
+- [CLI Reference](cli.md)
+- [Python API](api.md)

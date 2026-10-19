@@ -1,321 +1,241 @@
 # Import/Export
 
-Complete guide to importing books and exporting library data.
+## Importing books
 
-## Importing Books
+Every import extracts metadata, a cover thumbnail, and the book's text (unless
+disabled with `--no-text` / `--no-cover`). Files are stored under `files/` by
+SHA-256 hash: importing the same file twice is a no-op, and the same book in a
+different format is attached as an additional format.
 
-### From Individual Files
+### Individual files
 
 ```bash
-# Import a single ebook
-ebk import add book.pdf ~/my-library
-ebk import add ~/Downloads/book.epub ~/my-library
-
-# Import with specific metadata
-ebk import add book.pdf ~/my-library \
+book-memex import add book.pdf ~/my-library
+book-memex import add ~/Downloads/book.epub ~/my-library \
     --title "My Book" \
-    --author "John Doe"
+    --authors "John Doe, Jane Roe" \
+    --subjects "Programming,Python"
 ```
 
-### Batch Import from Folder
+Supported formats: PDF, EPUB, MOBI/AZW3, and plaintext.
+
+### A whole folder
 
 ```bash
-# Import all ebooks from a folder
-ebk import folder ~/Downloads/ebooks ~/my-library
-
-# With specific extensions only
-ebk import folder ~/Downloads ~/my-library --extensions pdf,epub,mobi
-
-# Recursive (include subfolders)
-ebk import folder ~/ebooks ~/my-library --recursive
-
-# Resume interrupted import (skip already imported)
-ebk import folder ~/ebooks ~/my-library --resume
+book-memex import folder ~/Downloads/ebooks ~/my-library
+book-memex import folder ~/Downloads ~/my-library --extensions pdf,epub,mobi
+book-memex import folder ~/ebooks ~/my-library --no-recursive
+book-memex import folder ~/ebooks ~/my-library --dry-run
+book-memex import folder ~/ebooks ~/my-library --log-failures failed.txt
 ```
 
-### From Calibre Library
+Recursion and resume (skip files already in the library by hash) are on by
+default.
+
+### Calibre
 
 ```bash
-# Import entire Calibre library
-ebk import calibre ~/Calibre/Library ~/my-library
-
-# Limit import
-ebk import calibre ~/Calibre/Library ~/my-library --limit 100
+book-memex import calibre ~/Calibre/Library ~/my-library
+book-memex import calibre ~/Calibre/Library ~/my-library --limit 100
 ```
 
-### From OPDS Catalog
-
-Import from OPDS feeds (Gutenberg, Standard Ebooks, etc.):
+### OPDS feeds, URLs, ISBNs
 
 ```bash
-# Import from OPDS feed
-ebk import opds "https://standardebooks.org/opds" ~/my-library
-
-# With limit
-ebk import opds "https://example.com/opds/catalog.xml" ~/my-library --limit 50
+book-memex import opds "https://standardebooks.org/opds" ~/my-library --limit 50
+book-memex import url "https://example.com/book.pdf" ~/my-library
+book-memex import isbn 978-0201633610 ~/my-library     # metadata-only entry
 ```
 
-### From URL
+ISBN lookups query Google Books and Open Library and create a book without a file.
+
+### arkiv bundles
+
+[arkiv](#arkiv-the-interchange-format) is the `*-memex` ecosystem's interchange
+format. Importing a bundle restores books, marginalia, and reading sessions:
 
 ```bash
-# Download and import from URL
-ebk import url "https://example.com/book.pdf" ~/my-library
+book-memex import arkiv ~/my-library ~/archive.zip      # note: library first
+book-memex import arkiv ~/my-library ~/archive/          # directory form
+book-memex import arkiv ~/my-library ~/records.jsonl.gz
 ```
 
-### By ISBN
+Books are inserted or skipped by `unique_id` (existing rows are left untouched, so
+local tags and personal metadata survive); marginalia and reading sessions are
+inserted or skipped by UUID. Reading sessions whose book is not in the library
+are reported as orphaned and skipped. Importing the same bundle twice is safe.
+`--merge` is accepted for parity with other memex archives but does not change
+behavior today.
 
-Create a book entry by looking up ISBN from Google Books or Open Library:
+## Exporting library data
+
+All export commands take `LIBRARY_PATH OUTPUT`. Most accept `--view NAME` to
+export only one [view](library-management.md#views), including the built-in
+views (`favorites`, `reading`, `completed`, `unread`, `recent`, `top-rated`).
+
+### arkiv: the interchange format
 
 ```bash
-# Lookup by ISBN
-ebk import isbn 978-0201633610 ~/my-library
-
-# With specific provider
-ebk import isbn 978-0201633610 ~/my-library --provider google
-ebk import isbn 978-0201633610 ~/my-library --provider openlibrary
+book-memex export arkiv ~/my-library ~/archive/          # directory
+book-memex export arkiv ~/my-library ~/archive.zip       # single zip file
+book-memex export arkiv ~/my-library ~/archive.tar.gz    # single tar.gz file
 ```
 
-## Exporting Library Data
+The bundle contains:
 
-### JSON Export
+- `records.jsonl`: one JSON record per book, marginalia, and reading session,
+  each carrying its `book-memex://` URI.
+- `schema.yaml`: per-kind field documentation and live counts.
+- `README.md`: a description of the bundle and the command to import it again.
 
-Complete metadata export in JSON format:
+The directory form is canonical; `.zip` and `.tar.gz` are the same directory
+packed for sharing. Soft-deleted (archived) records are not exported.
+
+### Single-file HTML app
 
 ```bash
-# Export all books
-ebk export json ~/my-library ~/backup.json
-
-# Pretty-printed
-ebk export json ~/my-library ~/backup.json --pretty
-
-# Export specific view
-ebk export json ~/my-library ~/favorites.json --view favorites
+book-memex export html-app ~/my-library ~/library.html
 ```
 
-### CSV Export
+One portable `.html` file containing a vendored copy of sql.js, a gzipped copy of
+the database (FTS tables stripped), and hash-based routing, so deep links and the
+back button work. It makes no network requests and opens in any modern browser.
+Archived records are excluded.
 
-Spreadsheet-compatible format:
+### HTML catalog
 
 ```bash
-# Basic CSV export
-ebk export csv ~/my-library ~/catalog.csv
-
-# Export specific view
-ebk export csv ~/my-library ~/python-books.csv --view python
+book-memex export html ~/my-library ~/catalog.html
+book-memex export html ~/my-library ~/favorites.html --view favorites
+book-memex export html ~/my-library ~/site/static/library.html --base-url /library --copy
+book-memex export html ~/my-library ~/library.html --language en --format pdf --min-rating 4
 ```
 
-### Goodreads Export
+A self-contained, searchable, filterable catalog that works offline. `--base-url`
+sets the prefix for file links when deploying to a web server, and `--copy` copies
+the referenced book files and covers next to the output. Filters: `--language`,
+`--author`, `--subject`, `--format`, `--favorite`, `--min-rating`,
+`--has-files/--no-files`. The catalog uses client-side filtering, not the
+[search syntax](search.md).
 
-Export in Goodreads-compatible format for import into your Goodreads account:
+### OPDS catalog file
 
 ```bash
-ebk export goodreads ~/my-library ~/goodreads.csv
-ebk export goodreads ~/my-library ~/favorites.csv --view favorites
+book-memex export opds ~/my-library ~/opds/catalog.xml
+book-memex export opds ~/my-library ~/opds/catalog.xml \
+    --base-url https://example.com/opds --copy-files --copy-covers
 ```
 
-The Goodreads CSV includes:
-- Title, Author, Additional Authors
-- ISBN/ISBN13
-- My Rating (1-5 stars)
-- Exclusive Shelf (read, currently-reading, to-read)
-- Bookshelves (from tags)
-- Date Read, Date Added
-- Page count, Publisher, Year
+An OPDS 1.2 Atom feed for e-reader apps (Foliate, KOReader, ...). With
+`--copy-files --copy-covers` the output directory is self-contained and can be
+served by any static file host. OPDS export currently needs the `server` extra
+installed (it shares code with the live catalog served by `book-memex serve`).
 
-Import at: https://www.goodreads.com/review/import
-
-### Calibre Export
-
-Export in Calibre-compatible format:
+### JSON and CSV
 
 ```bash
-ebk export calibre ~/my-library ~/calibre.csv
-ebk export calibre ~/my-library ~/subset.csv --view programming
+book-memex export json ~/my-library ~/backup.json
+book-memex export json ~/my-library ~/backup.json --no-marginalia
+book-memex export csv ~/my-library ~/catalog.csv --view favorites
 ```
 
-The Calibre CSV includes:
-- title, authors, author_sort
-- publisher, pubdate
-- languages, rating (0-10 scale)
-- tags, series, series_index
-- identifiers (ISBN, ASIN, etc.)
-- comments/description
-
-### HTML Export
-
-Self-contained HTML catalog with pagination and client-side filtering:
+### Goodreads and Calibre CSV
 
 ```bash
-# Basic export
-ebk export html ~/my-library ~/catalog.html
-
-# With file and cover copying for static hosting
-ebk export html ~/my-library ~/site/catalog.html \
-    --base-url /library \
-    --copy-files \
-    --copy-covers
-
-# Export a specific view
-ebk export html ~/my-library ~/favorites.html --view favorites
-
-# With filters
-ebk export html ~/my-library ~/english.html \
-    --language en \
-    --has-files
+book-memex export goodreads ~/my-library ~/goodreads.csv
+book-memex export calibre ~/my-library ~/calibre.csv
 ```
 
-HTML export features:
-- **Pagination**: 50 books per page
-- **URL State**: Bookmarkable page/filter state
-- **Client-side Filtering**: By language, format, series, favorites, rating
-- **Sorting**: By title, author, rating, date
-- **Search Bar**: Text search across metadata
-- **Responsive**: Desktop and mobile support
-- **Offline**: No server required
+The Goodreads CSV includes title, authors, ISBN/ISBN13, rating, reading status
+shelf, bookshelves (from tags), page count, publisher, and year; import it at
+<https://www.goodreads.com/review/import>. The Calibre CSV includes title,
+authors, author sort, publisher, date, languages, rating (0-10 scale), tags,
+series, identifiers, and comments.
 
-### OPDS Export
-
-Create an OPDS catalog feed for e-reader apps (Foliate, KOReader, Moon+ Reader):
+### ECHO archive
 
 ```bash
-# Basic OPDS catalog
-ebk export opds ~/my-library ~/opds/catalog.xml
-
-# With file and cover copying
-ebk export opds ~/my-library ~/opds/catalog.xml \
-    --base-url https://example.com/opds \
-    --copy-files \
-    --copy-covers
-
-# Export a view
-ebk export opds ~/my-library ~/opds/favorites.xml --view favorites
+book-memex export echo ~/my-library ~/archive/ --owner "Your Name"
+book-memex export echo ~/my-library ~/archive/ --view favorites --no-db
 ```
 
-## Backup and Restore
+A durable, self-describing directory: a `README.md`, `books.jsonl`, an optional
+copy of `library.db`, `covers/`, and `by-author/` Markdown indexes.
 
-### Create Backup
+### A single book
 
 ```bash
-# Database backup (tar.gz)
-ebk backup ~/my-library ~/backups/
+book-memex book export 42                          # JSON to stdout
+book-memex book export 42 -f bibtex                # BibTeX citation
+book-memex book export 42 -f files -o ./exports/   # copy the book's files
+book-memex note export 42 -o notes.md              # the book's marginalia
 ```
 
-### Restore from Backup
+## Backup and restore
+
+`lib backup` archives the library directory itself (database plus, by default,
+book files and covers):
 
 ```bash
-# Restore to new location
-ebk restore ~/backups/library-2024-01-01.tar.gz ~/restored-library
-
-# Force overwrite existing
-ebk restore ~/backups/backup.tar.gz ~/my-library --force
+book-memex lib backup ~/my-library -o ~/backups/library.tar.gz
+book-memex lib backup ~/my-library -o ~/backups/db-only.zip --db-only
+book-memex lib restore ~/backups/library.tar.gz ~/restored-library
+book-memex lib restore ~/backups/library.tar.gz ~/my-library --force
 ```
 
-## Use Cases
+Use `lib backup` for a byte-for-byte restore of one library; use `export arkiv`
+for a durable, tool-independent record of your books and annotations that other
+memex tools can read.
+
+## Use cases
 
 ### Migrating from Calibre
 
 ```bash
-# 1. Import from Calibre
-ebk import calibre ~/Calibre/Library ~/my-library
-
-# 2. Verify import
-ebk stats ~/my-library
-
-# 3. Export to compare
-ebk export json ~/my-library ~/imported.json
+book-memex lib init ~/my-library
+book-memex import calibre ~/Calibre/Library ~/my-library
+book-memex query stats ~/my-library
+book-memex lib check ~/my-library
 ```
 
-### Syncing with Goodreads
+### Publishing a web catalog
 
 ```bash
-# Export your ebk ratings and status
-ebk export goodreads ~/my-library ~/sync.csv
-
-# Import at goodreads.com/review/import
-```
-
-### Publishing a Web Catalog
-
-```bash
-# 1. Create a view of books to share
-ebk view create public ~/my-library \
-    --has-files \
-    --min-rating 3
-
-# 2. Export for web hosting
-ebk export html ~/my-library ~/public/catalog.html \
-    --view public \
-    --base-url /books \
-    --copy-files \
-    --copy-covers
-
-# 3. Deploy
+book-memex view create public -L ~/my-library --rating-gte 3
+book-memex export html ~/my-library ~/public/catalog.html \
+    --view public --base-url /books --copy
 rsync -av ~/public/ user@server:/var/www/books/
 ```
 
-### Creating an OPDS Server
+### Data analysis
 
 ```bash
-# 1. Export OPDS catalog
-ebk export opds ~/my-library ~/opds/catalog.xml \
-    --base-url https://myserver.com/opds \
-    --copy-files \
-    --copy-covers
-
-# 2. Serve with any static file server
-cd ~/opds && python -m http.server 8080
-```
-
-### Data Analysis
-
-```bash
-# Export to JSON for analysis
-ebk export json ~/my-library ~/data.json --pretty
-
-# Query with jq
-jq '.[] | select(.rating >= 4) | .title' ~/data.json
-
-# Load into Python/pandas
-python -c "
-import json
-import pandas as pd
-with open('data.json') as f:
-    books = json.load(f)
-df = pd.DataFrame(books)
-print(df.groupby('language').size())
-"
+book-memex export json ~/my-library ~/data.json
+book-memex query sql "SELECT language, COUNT(*) AS n FROM books GROUP BY language" ~/my-library --format csv
 ```
 
 ## Python API
 
 ```python
 from pathlib import Path
-from ebk.library_db import Library
-from ebk.services import ExportService
+from book_memex.library_db import Library
+from book_memex.services import ExportService
 
-lib = Library.open(Path("~/my-library"))
+lib = Library.open(Path("~/my-library").expanduser())
+
+lib.export_arkiv(Path("archive.zip"))
+lib.export_html_app(Path("library.html"))
+
 export_svc = ExportService(lib.session, lib.library_path)
-
-# Get books (all or filtered)
-books = lib.get_all_books()
-# or
 books = lib.query().filter_by_language("en").all()
-
-# Export to different formats
-json_str = export_svc.export_json(books, pretty=True)
-csv_str = export_svc.export_csv(books)
-goodreads_csv = export_svc.export_goodreads_csv(books)
-calibre_csv = export_svc.export_calibre_csv(books)
-
-# Write to files
-with open("backup.json", "w") as f:
-    f.write(json_str)
+Path("backup.json").write_text(export_svc.export_json(books, pretty=True))
+Path("goodreads.csv").write_text(export_svc.export_goodreads_csv(books))
 
 lib.close()
 ```
 
-## See Also
+## See also
 
-- [CLI Reference](cli.md) - Complete command options
-- [Views](library-management.md#views) - Create named subsets for export
-- [Search Syntax](search.md) - Filter before exporting
+- [CLI Reference](cli.md)
+- [Library Management](library-management.md)
+- [Search Syntax](search.md)

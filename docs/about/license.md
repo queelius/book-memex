@@ -1,5 +1,6 @@
 # License
 
-ebk is distributed under the MIT License.
+book-memex is distributed under the MIT License.
 
-See [LICENSE](../../LICENSE) file for details.
+See the [LICENSE](https://github.com/queelius/book-memex/blob/master/LICENSE) file
+for details.

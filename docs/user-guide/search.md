@@ -1,18 +1,18 @@
 # Search & Query
 
-ebk provides powerful search capabilities with field-specific queries, boolean logic, and full-text search powered by SQLite FTS5.
+book-memex provides powerful search capabilities with field-specific queries, boolean logic, and full-text search powered by SQLite FTS5.
 
 ## Quick Start
 
 ```bash
 # Simple full-text search
-ebk search "machine learning" ~/my-library
+book-memex query search "machine learning" ~/my-library
 
 # Field-specific search
-ebk search "title:Python rating:>=4" ~/my-library
+book-memex query search "title:Python rating:>=4" ~/my-library
 
 # Multiple criteria
-ebk search "author:Knuth format:pdf" ~/my-library
+book-memex query search "author:Knuth format:pdf" ~/my-library
 ```
 
 ## Advanced Search Syntax
@@ -28,22 +28,21 @@ Search within specific fields using `field:value` syntax:
 | `tag:` or `subject:` | Search subjects/tags | `tag:programming` |
 | `description:` | Search in book descriptions | `description:algorithms` |
 | `text:` | Search in extracted text | `text:recursion` |
-| `series:` | Search by series name | `series:TAOCP` |
 
 **Examples:**
 
 ```bash
 # Books with "intelligence" in the title
-ebk search "title:intelligence" ~/my-library
+book-memex query search "title:intelligence" ~/my-library
 
 # Books by Donald Knuth
-ebk search "author:Knuth" ~/my-library
+book-memex query search "author:Knuth" ~/my-library
 
 # Books tagged with "programming"
-ebk search "tag:programming" ~/my-library
+book-memex query search "tag:programming" ~/my-library
 
 # Search book descriptions for "algorithm"
-ebk search "description:algorithm" ~/my-library
+book-memex query search "description:algorithm" ~/my-library
 ```
 
 ### Filter Fields
@@ -57,21 +56,26 @@ Apply exact filters using the same syntax:
 | `rating:` | Filter by rating (with operators) | `rating:>=4` |
 | `favorite:` | Filter favorites only | `favorite:true` |
 | `status:` | Filter by reading status | `status:reading` |
+| `series:` | Exact series name | `series:TAOCP` |
+| `publisher:` | Exact publisher | `publisher:"MIT Press"` |
+
+Aliases: `tag:`/`tags:`/`subjects:` mean `subject:`, `lang:` means `language:`,
+and `fmt:`/`type:` mean `format:`.
 
 **Examples:**
 
 ```bash
 # English books only
-ebk search "python language:en" ~/my-library
+book-memex query search "python language:en" ~/my-library
 
 # PDF files only
-ebk search "algorithms format:pdf" ~/my-library
+book-memex query search "algorithms format:pdf" ~/my-library
 
 # Books rated 4 stars or higher
-ebk search "title:learning rating:>=4" ~/my-library
+book-memex query search "title:learning rating:>=4" ~/my-library
 
 # Favorite books
-ebk search "programming favorite:true" ~/my-library
+book-memex query search "programming favorite:true" ~/my-library
 ```
 
 ### Rating Comparisons
@@ -90,10 +94,10 @@ rating:3-5         # Between 3 and 5 stars (range)
 
 ```bash
 # Highly rated Python books
-ebk search "title:Python rating:>=4" ~/my-library
+book-memex query search "title:Python rating:>=4" ~/my-library
 
 # Books rated between 3 and 4 stars
-ebk search "rating:3-4" ~/my-library
+book-memex query search "rating:3-4" ~/my-library
 ```
 
 ### Boolean Operators
@@ -111,16 +115,16 @@ Combine search terms with boolean logic:
 
 ```bash
 # Books about both Python AND machine learning
-ebk search "python machine learning" ~/my-library
+book-memex query search "python machine learning" ~/my-library
 
 # Books about Python OR JavaScript
-ebk search "python OR javascript" ~/my-library
+book-memex query search "python OR javascript" ~/my-library
 
 # Programming books excluding Java
-ebk search "programming NOT java" ~/my-library
+book-memex query search "programming NOT java" ~/my-library
 
 # Same as above, using shorthand
-ebk search "programming -java" ~/my-library
+book-memex query search "programming -java" ~/my-library
 ```
 
 ### Phrase Searches
@@ -129,13 +133,13 @@ Use quotes for exact phrase matching:
 
 ```bash
 # Exact phrase
-ebk search '"machine learning"' ~/my-library
+book-memex query search '"machine learning"' ~/my-library
 
 # Phrase in specific field
-ebk search 'title:"deep learning"' ~/my-library
+book-memex query search 'title:"deep learning"' ~/my-library
 
 # Phrase with filters
-ebk search '"artificial intelligence" language:en format:pdf' ~/my-library
+book-memex query search '"artificial intelligence" language:en format:pdf' ~/my-library
 ```
 
 ### Combined Queries
@@ -144,21 +148,21 @@ Mix field searches, filters, and boolean logic:
 
 ```bash
 # Python books, 4+ stars, PDF format
-ebk search "title:Python rating:>=4 format:pdf" ~/my-library
+book-memex query search "title:Python rating:>=4 format:pdf" ~/my-library
 
 # Books by Knuth in his TAOCP series
-ebk search "author:Knuth series:TAOCP" ~/my-library
+book-memex query search "author:Knuth series:TAOCP" ~/my-library
 
 # Favorite programming books (not Java)
-ebk search "tag:programming favorite:true NOT java" ~/my-library
+book-memex query search "tag:programming favorite:true NOT java" ~/my-library
 
 # Machine learning books in English, highly rated
-ebk search '"machine learning" language:en rating:>=4' ~/my-library
+book-memex query search '"machine learning" language:en rating:>=4' ~/my-library
 ```
 
 ## Full-Text Search (FTS5)
 
-ebk uses SQLite FTS5 for fast full-text indexing across:
+book-memex uses SQLite FTS5 for fast full-text indexing across:
 
 - **Book titles**
 - **Descriptions**
@@ -171,39 +175,77 @@ The FTS5 engine provides:
 - **Ranking**: Results ordered by relevance
 - **Fast performance**: Indexed searches even on large libraries
 
+`author:` and `subject:` are matched with SQL joins rather than FTS (authors and
+subjects are not in the FTS table), and the filter fields become SQL conditions.
+
+!!! note "Keeping `books_fts` current"
+    The metadata index (`books_fts`) is filled when a book's text is extracted at
+    import time. A book imported with `--no-text`, or one whose text extraction
+    produced nothing, has no `books_fts` row, so plain-text and `title:` searches
+    will not find it (filter-only queries such as `author:` still do). Run
+    `book-memex reindex-metadata --all -L ~/my-library` to rebuild the index.
+
+## Content search (per segment)
+
+Separately from `books_fts`, every imported book's text is split into
+segments (EPUB chapters, PDF pages, or a whole plaintext file) stored in
+`book_content` and indexed in `book_content_fts`. Content search returns ranked
+snippets with an anchor (EPUB CFI, PDF page, or text offset) and a ready-made URI
+fragment such as `book-memex://book/<unique_id>#page=47`.
+
+- REST: `GET /api/books/{book_id}/search?q=...` (one book) and
+  `GET /api/search/content?q=...` (whole library).
+- MCP: `search_book_content`, `search_library_content`, `get_segment`, and
+  `get_segments` (see [MCP Server](../integrations/mcp.md)).
+- Rebuild with `book-memex reindex-content --all -L ~/my-library`, or for one
+  book with `--book ID`.
+
+## Raw SQL
+
+For anything the search syntax cannot express, `query sql` runs a read-only
+`SELECT` against the database:
+
+```bash
+book-memex query sql "SELECT title, language FROM books WHERE language = 'en'" ~/my-library
+book-memex query sql "SELECT COUNT(*) AS n FROM books" ~/my-library --format json
+```
+
 ## Search in Different Contexts
 
 ### CLI Search
 
 ```bash
 # Basic search
-ebk search "query" ~/my-library
+book-memex query search "query" ~/my-library
 
 # Limit results
-ebk search "query" ~/my-library --limit 20
+book-memex query search "query" ~/my-library --limit 20
+
+# Next page
+book-memex query search "query" ~/my-library --limit 20 --offset 20
 ```
 
 ### Web Server Search
 
-The web server (`ebk serve`) provides advanced search via REST API:
+The web server (`book-memex serve`) exposes the same parser over REST:
 
 ```bash
 # Start server
-ebk serve ~/my-library
+book-memex serve ~/my-library
 
 # Search via API
-curl "http://localhost:8000/api/search?q=title:Python+rating:>=4"
+curl -G "http://127.0.0.1:8000/api/search" --data-urlencode "q=title:Python rating:>=4"
 ```
 
-The web UI includes a search bar with the same advanced syntax.
+The library UI's search box uses the same syntax.
 
 ### Python API
 
 ```python
-from ebk.library_db import Library
 from pathlib import Path
+from book_memex.library_db import Library
 
-lib = Library.open(Path("~/my-library"))
+lib = Library.open(Path("~/my-library").expanduser())
 
 # Simple search
 results = lib.search("machine learning", limit=50)
@@ -221,8 +263,8 @@ lib.close()
 
 **HTML Export**: The exported HTML files use **client-side JavaScript filtering**, not the advanced search parser. For advanced search features, use:
 
-- CLI: `ebk search`
-- Web server: `ebk serve`
+- CLI: `book-memex query search`
+- Web server: `book-memex serve`
 - Python API: `Library.search()`
 
 ## Tips and Best Practices
@@ -236,4 +278,5 @@ lib.close()
 ## See Also
 
 - [CLI Reference](cli.md) - Full command documentation
-- [Server](server.md) - Web server search API
+- [Web Server and Reader](server.md) - REST search endpoints
+- [MCP Server](../integrations/mcp.md) - content search tools

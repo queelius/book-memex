@@ -1,353 +1,188 @@
 # CLI Reference
 
-Complete reference for all ebk commands.
+The CLI is a tree of command groups: `book-memex <group> <command> [ARGS] [OPTIONS]`.
+This page summarizes every command; `book-memex <group> <command> --help` is the
+authoritative source for options.
 
-## Global Options
+!!! note "Library path argument"
+    Most commands take the library directory as a positional argument. Where the
+    signature shows `[LIBRARY_PATH]` (in brackets) it is optional and falls back
+    to `library.default_path` from the [configuration](../getting-started/configuration.md).
+    Where it shows `LIBRARY_PATH` without brackets it is required. The `view`
+    commands and the content-indexing commands take the library as an option
+    (`--library` / `--library-path`, short `-L`) instead.
 
-```bash
-ebk --help              # Show help
-ebk --verbose           # Enable verbose output
-ebk --version           # Show version
-```
+The legacy `ebk` command forwards to `book-memex` with a deprecation notice.
 
-## Library Management Commands
-
-### init
-
-Initialize a new library:
-
-```bash
-ebk init <library-path>
-```
-
-Creates a new ebk library with database and directory structure.
-
-### import
-
-Import ebook files:
+## Global options
 
 ```bash
-ebk import <file> <library-path>
-ebk import <file1> <file2> ... <library-path>
-ebk import ~/books/*.pdf <library-path>
+book-memex --help          # list command groups
+book-memex --verbose ...   # (-v) verbose logging for any command
+book-memex --install-completion
 ```
 
-Options:
-- `--extract-text` - Extract text for FTS (default: true)
-- `--extract-cover` - Extract cover image (default: true)
-- `--recursive` - Import directories recursively
+## Top-level commands
 
-### import-calibre
+| Command | Purpose |
+|---------|---------|
+| `book-memex about` | Show a summary of features and commands. |
+| `book-memex config [OPTIONS]` | View or edit configuration (see [Configuration](../getting-started/configuration.md)). |
+| `book-memex serve [LIBRARY_PATH]` | Start the web server and browser reader (see [Web Server](server.md)). |
+| `book-memex mcp-serve [LIBRARY_PATH]` | Start the MCP server over stdio (see [MCP Server](../integrations/mcp.md)). |
+| `book-memex extract BOOK_ID -L LIB` | Run the per-segment content extractor on one book's primary file. |
+| `book-memex reindex-content (--book ID or --all) -L LIB` | Re-extract segment content (`book_content` / `book_content_fts`). |
+| `book-memex reindex-metadata (--book ID or --all) -L LIB` | Rebuild the `books_fts` metadata index (title/description). |
 
-Import from Calibre library:
+`serve` options: `--host`, `--port`, `--reload`, `--no-open`, `--allow-remote`.
+
+## `lib`: library lifecycle
+
+| Command | Purpose |
+|---------|---------|
+| `lib init LIBRARY_PATH` | Create a new library (`library.db`, `files/`, `covers/`). |
+| `lib migrate [LIBRARY_PATH]` | Apply pending schema migrations. `--check` lists pending ones, `--version` shows the schema version. |
+| `lib backup [LIBRARY_PATH] -o FILE` | Write a `.tar.gz` or `.zip` backup. `--db-only` skips book files, `--no-covers` skips covers. |
+| `lib restore BACKUP_FILE LIBRARY_PATH` | Restore a backup into a (new) library directory. `--force` overwrites. |
+| `lib check [LIBRARY_PATH]` | Report missing files, orphan files, books without files, and hash mismatches. `--fix` removes orphan DB entries; `--identity` reports books whose stored `unique_id` no longer matches the canonical generator. |
 
 ```bash
-ebk import-calibre <calibre-library> --output <ebk-library>
+book-memex lib init ~/my-library
+book-memex lib backup ~/my-library -o ~/backup.tar.gz
+book-memex lib check ~/my-library --identity
 ```
 
-Options:
-- `--output` - Output library path (required)
-- `--formats` - File formats to import (default: all)
+## `import`: bring books in
 
-### list
+| Command | Purpose |
+|---------|---------|
+| `import add FILE_PATH [LIBRARY_PATH]` | Import one ebook. `--title`, `--authors` (comma-separated), `--subjects`, `--language`, `--no-text`, `--no-cover`, `--no-auto-metadata`. |
+| `import folder FOLDER_PATH [LIBRARY_PATH]` | Batch import. `--no-recursive`, `--extensions pdf,epub,...`, `--limit`, `--dry-run`, `--no-resume`, `--log-failures FILE`, `--no-text`, `--no-cover`. |
+| `import calibre CALIBRE_PATH LIBRARY_PATH` | Import a Calibre library (reads `metadata.opf`). `--limit`. |
+| `import opds OPDS_URL [LIBRARY_PATH]` | Import from an OPDS catalog feed. `--limit/-n`. |
+| `import url URL [LIBRARY_PATH]` | Download and import an ebook. |
+| `import isbn ISBN [LIBRARY_PATH]` | Create a metadata-only entry from Google Books / Open Library. |
+| `import arkiv LIBRARY_PATH BUNDLE_PATH` | Import an arkiv bundle (directory, `.zip`, `.tar.gz`, `.tgz`, `.jsonl`, `.jsonl.gz`). Duplicate-safe; `--merge` is accepted for ecosystem parity. |
 
-List books in library:
+Note the argument order of `import arkiv`: library first, then bundle.
+
+## `export`: write the library out
+
+All export commands take `LIBRARY_PATH OUTPUT` (both required).
+
+| Command | Output |
+|---------|--------|
+| `export arkiv LIB OUT` | arkiv bundle: a directory, or a single `.zip` / `.tar.gz` / `.tgz` file, containing `records.jsonl`, `schema.yaml`, `README.md`. |
+| `export html-app LIB OUT` | Single-file HTML SPA with vendored sql.js, a gzipped database, and hash routing; works offline. |
+| `export html LIB OUT` | Self-contained HTML catalog. `--base-url`, `--copy`, `--view`, `--language`, `--author`, `--subject`, `--format`, `--no-files`, `--favorite`, `--min-rating`, `--no-stats`. |
+| `export opds LIB OUT` | OPDS 1.2 catalog file. `--title`, `--subtitle`, `--base-url`, `--copy-files`, `--copy-covers`, plus the same filters as `html`. |
+| `export json LIB OUT` | JSON metadata. `--no-marginalia`, `--view`. |
+| `export csv LIB OUT` | CSV metadata. `--view`. |
+| `export goodreads LIB OUT` | Goodreads-importable CSV. `--view`. |
+| `export calibre LIB OUT` | Calibre-compatible CSV. `--view`. |
+| `export echo LIB OUT_DIR` | ECHO-style durable archive directory. `--view`, `--no-db`, `--owner`. |
+
+See [Import/Export](import-export.md) for details.
+
+## `book`: per-book operations
+
+| Command | Purpose |
+|---------|---------|
+| `book info BOOK_ID [LIB]` | Show details. `--format table/json`. |
+| `book status BOOK_ID [LIB]` | Show, or `--set unread/reading/completed`, the reading status. |
+| `book progress BOOK_ID [LIB]` | Show, or `--set 0-100`, reading progress. |
+| `book rate BOOK_ID [LIB] --rating N` | Rate 0-5 stars. |
+| `book favorite BOOK_ID [LIB]` | Mark as favorite; `--unfavorite` to clear. |
+| `book tag BOOK_ID [LIB] --tags a,b` | Add (or `--remove`) personal tags on one book. |
+| `book open BOOK_ID [LIB]` | Open the file in the default application. `--format pdf`. |
+| `book read BOOK_ID [LIB]` | Open the file, or `--text [--page N]` to page through extracted text in the terminal. |
+| `book edit BOOK_ID [LIB]` | Edit metadata: `--title`, `--authors`, `--language`, `--publisher`, `--series`, `--series-index`, `--description`, `--add-subject`, `--remove-subject`. |
+| `book delete BOOK_ID [LIB]` | Soft delete (archive) by default. `--hard` removes the row; `--delete-files` also unlinks files; `-y` skips confirmation. |
+| `book merge PRIMARY_ID SECONDARY_IDS [LIB]` | Merge duplicates (`43,44,45`) into the primary. `--dry-run`, `--delete-duplicates`, `-y`. |
+| `book bulk-edit [LIB]` | Select with `--ids`, `--search`, or `--view`, then set `--language`, `--publisher`, `--series`, `--add-tag`, `--remove-tag`, `--add-subject`, `--rating`, `--status`, `--favorite/--no-favorite`. `--dry-run`, `-y`. |
+| `book similar BOOK_ID [LIB]` | Find similar books (needs the `similarity` extra). `--limit`, `--mode auto/balanced/metadata/sparse`, `--format`. |
+| `book export BOOK_ID [LIB]` | Export one book: `-f json/bibtex/opds/files`, `-o PATH`, `--include-files`. |
+| `book purge LIBRARY_PATH` | Remove books matching criteria (`--no-files`, `--no-supported-formats`, `--language`, `--format`, `--unread`, `--max-rating`, `--author`, `--subject`). Dry run unless `--execute`; `--delete-files` also removes files. |
+| `book review add/list/show/edit/delete` | Structured reviews (`--content`, `--title`, `--rating`, `--type personal/summary/critique/notes`). |
 
 ```bash
-ebk list <library-path>
+book-memex book status 42 --set reading
+book-memex book merge 42 43,44 --dry-run
+book-memex book bulk-edit --search "author:Knuth" --add-subject "Computer Science" --dry-run
+book-memex book export 42 -f bibtex
+book-memex book review add 42 -c "Great book" -t "Recommended" -r 5
 ```
 
-Options:
-- `--author <name>` - Filter by author
-- `--language <code>` - Filter by language (e.g., en, de)
-- `--format <format>` - Filter by file format (pdf, epub, mobi)
-- `--rating <number>` - Filter by minimum rating (0-5)
-- `--tag <tag>` - Filter by personal tag
-- `--limit <number>` - Limit results (default: 50)
-- `--sort-by <field>` - Sort by field (title, author, date, rating)
-- `--format json` - Output as JSON
+## `note`: marginalia
 
-### search
+| Command | Purpose |
+|---------|---------|
+| `note add BOOK_ID [LIB] --content TEXT` | Add a note. `--highlight TEXT` (passage), `--page N`, `--category`. Use `BOOK_ID` 0 for a collection-level note. |
+| `note list BOOK_ID [LIB]` | List marginalia for a book. `--category`. |
+| `note extract BOOK_ID [LIB]` | Import highlights/notes embedded in the book's PDF/EPUB files. `--format pdf/epub`. |
+| `note export BOOK_ID [LIB]` | Export a book's marginalia. `--format markdown/json`, `-o FILE`. |
 
-Full-text search:
+Editing, archiving, and restoring marginalia, and cross-book notes, are available
+through the [REST API](server.md) and the [MCP tools](../integrations/mcp.md).
+
+## `tag`: hierarchical tags
+
+All `tag` commands require the library path.
+
+| Command | Purpose |
+|---------|---------|
+| `tag list LIB` | List all tags; `-t TAG` lists books with a tag, `-s` includes subtags. |
+| `tag tree LIB` | Show the tag tree; `-r ROOT` for a subtree. |
+| `tag add BOOK_ID TAG_PATH LIB` | Tag a book, creating the hierarchy as needed. `-d DESCRIPTION`, `-c '#hex'`. |
+| `tag remove BOOK_ID TAG_PATH LIB` | Untag a book. |
+| `tag rename OLD_PATH NEW_PATH LIB` | Rename a tag and all descendants. |
+| `tag delete TAG_PATH LIB` | Delete a tag; `-r` with children, `-f` without confirmation. |
+| `tag stats LIB` | Tag statistics; `-t TAG` for one tag. |
+
+## `queue`: reading queue
+
+| Command | Purpose |
+|---------|---------|
+| `queue list [LIB]` | Show the queue. |
+| `queue add BOOK_ID [LIB]` | Append, or insert at `--position N` (1 = top). |
+| `queue remove BOOK_ID [LIB]` | Remove from the queue. |
+| `queue move BOOK_ID POSITION [LIB]` | Reorder. |
+| `queue next [LIB]` | Show the next book. |
+| `queue clear [LIB]` | Clear the queue (`-y` skips confirmation). |
+
+## `view`: saved views
+
+Views take the library with `--library` / `-L` (or the configured default).
+
+| Command | Purpose |
+|---------|---------|
+| `view create NAME` | Create from simple filters (`--subject`, `--author`, `--language`, `--favorite`, `--status`, `--rating-gte`), from `--sql "SELECT id FROM books ..."`, or from `--from-file view.yaml`. `--description`. |
+| `view list` | List views, including built-ins (`--no-builtin` to hide them). |
+| `view show NAME` | Show books in a view (`--limit`), or `--definition` for its YAML. |
+| `view add NAME BOOK_ID` / `view remove NAME BOOK_ID` | Explicitly include a book in, or remove it from, a view. |
+| `view set NAME BOOK_ID` | Per-view overrides: `--title`, `--description`, `--position`. |
+| `view unset NAME BOOK_ID` | Remove overrides (`--field` for one). |
+| `view export NAME` / `view import FILE` | YAML round trip (`-o FILE`, `--overwrite`). |
+| `view edit NAME` | Edit the YAML definition in `$EDITOR`. |
+| `view delete NAME` | Delete a view (`-f` skips confirmation). |
+
+## `query`: search and discovery
+
+| Command | Purpose |
+|---------|---------|
+| `query search QUERY [LIB]` | Full-text + field search (see [Search](search.md)). `--limit/-n`, `--offset`. |
+| `query list [LIB]` | List books. `--author`, `--subject`, `--language`, `--favorite`, `--status`, `--view`, `--limit`, `--offset`. |
+| `query stats [LIB]` | Book, author, language, format, and reading-progress counts. |
+| `query sql QUERY [LIB]` | Run a read-only `SELECT`. `--format table/json/csv`, `--limit`. |
 
 ```bash
-ebk search <query> <library-path>
+book-memex query search "title:Python rating:>=4" ~/my-library
+book-memex query list ~/my-library --view favorites
+book-memex query sql "SELECT title, language FROM books WHERE language = 'en'" ~/my-library --format json
 ```
 
-Searches across:
-- Book title
-- Description
-- Extracted text content
-
-Options:
-- `--fields <field1,field2>` - Limit search to specific fields
-- `--language <code>` - Filter by language
-- `--author <name>` - Filter by author
-- `--limit <number>` - Limit results
-
-### stats
-
-Show library statistics:
-
-```bash
-ebk stats <library-path>
-```
-
-Options:
-- `--format json` - Output as JSON
-
-Displays:
-- Total books, authors, subjects
-- File formats and counts
-- Languages
-- Storage size
-
-## Reading Management
-
-### rate
-
-Rate a book:
-
-```bash
-ebk rate <library-path> <book-id> <rating>
-```
-
-Rating: 0-5 (0 = unrated)
-
-### favorite
-
-Toggle favorite status:
-
-```bash
-ebk favorite <library-path> <book-id>
-```
-
-### tag
-
-Manage personal tags:
-
-```bash
-# Add tags
-ebk tag <library-path> <book-id> --add "tag1" "tag2"
-
-# Remove tags
-ebk tag <library-path> <book-id> --remove "tag1"
-
-# List tags
-ebk tag <library-path> <book-id> --list
-```
-
-### purge
-
-Remove books from library:
-
-```bash
-ebk purge <library-path> [options]
-```
-
-Options:
-- `--rating <n>` - Remove books with rating <= n
-- `--unread` - Remove unread books
-- `--format <fmt>` - Remove specific format
-- `--confirm` - Skip confirmation prompt
-
-**Warning:** This permanently removes books!
-
-## Web Server
-
-### serve
-
-Start web server:
-
-```bash
-ebk serve <library-path>
-```
-
-Options:
-- `--host <host>` - Bind address (default: from config)
-- `--port <port>` - Port number (default: from config)
-- `--auto-open` - Open browser automatically
-
-## AI-Powered Features
-
-### enrich
-
-Enrich metadata using LLM:
-
-```bash
-ebk enrich <library-path>
-```
-
-Options:
-- `--generate-tags` - Generate descriptive tags
-- `--categorize` - Assign hierarchical categories
-- `--enhance-descriptions` - Improve descriptions
-- `--assess-difficulty` - Determine reading level
-- `--book-id <id>` - Enrich specific book
-- `--host <host>` - LLM server host
-- `--model <model>` - LLM model name
-- `--dry-run` - Preview changes without saving
-- `--batch-size <n>` - Process n books at a time
-
-## Configuration
-
-### config
-
-Manage configuration:
-
-```bash
-# Initialize
-ebk config init
-
-# View all
-ebk config show
-
-# View section
-ebk config show --section llm
-
-# Edit
-ebk config edit
-
-# Set value
-ebk config set <key> <value>
-
-# Get value
-ebk config get <key>
-```
-
-Configuration keys:
-- `server.host` - Web server host
-- `server.port` - Web server port
-- `server.auto_open_browser` - Auto-open browser
-- `server.page_size` - Results per page
-- `cli.verbose` - Verbose output
-- `cli.color` - Colored output
-- `library.default_path` - Default library path
-
-## Export and Utilities
-
-### export
-
-Export library:
-
-```bash
-# Export to ZIP
-ebk export zip <library-path> <output.zip>
-
-# Export to JSON
-ebk export json <library-path> <output.json>
-```
-
-### vlib
-
-Manage virtual libraries (filtered views):
-
-```bash
-# Create virtual library
-ebk vlib create <library-path> <name> [filters]
-
-# List virtual libraries
-ebk vlib list <library-path>
-
-# Delete virtual library
-ebk vlib delete <library-path> <name>
-```
-
-### note
-
-Manage book notes and annotations:
-
-```bash
-# Add note
-ebk note add <library-path> <book-id> "<note text>"
-
-# List notes
-ebk note list <library-path> <book-id>
-
-# Delete note
-ebk note delete <library-path> <note-id>
-```
-
-### view
-
-View book content:
-
-```bash
-ebk view <library-path> <book-id>
-```
-
-Opens the book in the default application for its format.
-
-### about
-
-Show information about ebk:
-
-```bash
-ebk about
-```
-
-Displays version, installation path, and configuration location.
-
-## Examples
-
-### Import and Organize
-
-```bash
-# Create library
-ebk init ~/my-library
-
-# Import Calibre collection
-ebk import-calibre ~/Calibre/Library --output ~/my-library
-
-# Import additional files
-ebk import ~/Downloads/*.pdf ~/my-library
-
-# Generate tags
-ebk enrich ~/my-library --generate-tags
-```
-
-### Search and Filter
-
-```bash
-# Search for Python books
-ebk search "Python programming" ~/my-library
-
-# List highly rated books
-ebk list ~/my-library --rating 4
-
-# Find books by Knuth
-ebk list ~/my-library --author Knuth
-```
-
-### Web Interface Workflow
-
-```bash
-# Configure server
-ebk config set server.port 8000
-ebk config set server.auto_open_browser true
-
-# Start server
-ebk serve ~/my-library
-
-# Browse at http://localhost:8000
-```
-
-### Batch Processing
-
-```bash
-# Import multiple directories
-find ~/Downloads -name "*.pdf" -exec ebk import {} ~/my-library \;
-
-# Enrich all books
-ebk enrich ~/my-library --generate-tags --categorize --batch-size 10
-
-# Export for backup
-ebk export zip ~/my-library ~/backup-$(date +%Y%m%d).zip
-```
-
-## See Also
-
-- [Configuration Guide](../getting-started/configuration.md) - Configure defaults
-- [Web Server](server.md) - Web interface details
-- [Python API](api.md) - Programmatic access
+## See also
+
+- [Configuration Guide](../getting-started/configuration.md)
+- [Web Server and Reader](server.md)
+- [Python API](api.md)

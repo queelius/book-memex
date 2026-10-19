@@ -1,223 +1,180 @@
 # Quick Start Guide
 
-Get started with ebk in just a few minutes.
+Get a library running in a few minutes. Every command below takes the library
+path explicitly; once you set a default library (step 9) most commands let you
+omit it.
 
-## 1. Create Your Library
+## 1. Create a library
 
 ```bash
-# Initialize a new library
-ebk init ~/my-library
+book-memex lib init ~/my-library
 ```
 
 This creates:
-- `library.db` - SQLite database with FTS5 full-text search
-- `files/` - Hash-prefixed ebook storage
-- `covers/` - Cover images and thumbnails
 
-## 2. Import Books
+- `library.db`: the SQLite database (with FTS5 full-text indexes)
+- `files/`: hash-prefixed ebook storage
+- `covers/`: cover images and thumbnails
 
-### Single File
+## 2. Import books
 
-```bash
-ebk import add book.pdf ~/my-library
-ebk import add ~/Downloads/book.epub ~/my-library
-```
-
-### Batch Import
+### Single file
 
 ```bash
-# Import all ebooks from a folder
-ebk import folder ~/Downloads/ebooks ~/my-library
-
-# With specific extensions
-ebk import folder ~/Downloads ~/my-library --extensions pdf,epub
+book-memex import add book.pdf ~/my-library
+book-memex import add ~/Downloads/book.epub ~/my-library --title "My Book" --authors "Some Author"
 ```
 
-### From Calibre
+### A whole folder
 
 ```bash
-ebk import calibre ~/Calibre/Library ~/my-library
+book-memex import folder ~/Downloads/ebooks ~/my-library
+book-memex import folder ~/Downloads ~/my-library --extensions pdf,epub
+book-memex import folder ~/Downloads ~/my-library --dry-run      # preview only
 ```
 
-### From OPDS Feed
+### From Calibre, OPDS, a URL, or an ISBN
 
 ```bash
-ebk import opds "https://example.com/opds/catalog.xml" ~/my-library
+book-memex import calibre ~/Calibre/Library ~/my-library
+book-memex import opds "https://example.com/opds/catalog.xml" ~/my-library
+book-memex import url "https://example.com/book.epub" ~/my-library
+book-memex import isbn 978-0201633610 ~/my-library
 ```
 
-### By ISBN
+Imports extract metadata, a cover, and the book's text automatically. The text
+is split into per-chapter / per-page segments and indexed for content search.
+
+## 3. Browse your library
 
 ```bash
-ebk import isbn 978-0201633610 ~/my-library
+# List books (paginated, with filters)
+book-memex query list ~/my-library
+book-memex query list ~/my-library --author "Knuth" --language en
+book-memex query list ~/my-library --limit 20 --offset 40
+
+# Search (full-text plus field syntax; see the Search guide)
+book-memex query search "machine learning" ~/my-library
+book-memex query search "author:Knuth" ~/my-library
+book-memex query search "title:Python language:en rating:>=4" ~/my-library
+
+# Details and statistics
+book-memex book info 42 ~/my-library
+book-memex query stats ~/my-library
 ```
 
-## 3. Browse Your Library
+## 4. Organize
 
-### List Books
+### Hierarchical tags
 
 ```bash
-# List all books
-ebk list ~/my-library
-
-# With filters
-ebk list ~/my-library --author "Knuth" --language en
-ebk list ~/my-library --limit 20 --offset 40  # Page 3
+book-memex tag add 42 Work/Projects ~/my-library
+book-memex tag list ~/my-library
+book-memex tag tree ~/my-library
+book-memex tag list ~/my-library -t Work -s     # books tagged Work or Work/*
 ```
 
-### Search
+### Views
+
+Views are named, composable subsets of the library. View commands take the
+library with `--library` / `-L` (or use the configured default):
 
 ```bash
-# Full-text search
-ebk search "machine learning" ~/my-library
-
-# Field-specific search
-ebk search "author:Knuth" ~/my-library
-ebk search "title:Python language:en" ~/my-library
-ebk search "rating:>=4 subject:Algorithms" ~/my-library
+book-memex view create python-favorites -L ~/my-library --subject Python --favorite
+book-memex view list -L ~/my-library
+book-memex view show python-favorites -L ~/my-library
 ```
 
-### View Details
+### Reading queue
 
 ```bash
-ebk book info 42 ~/my-library
+book-memex queue add 42 ~/my-library
+book-memex queue list ~/my-library
+book-memex queue next ~/my-library
 ```
 
-### Statistics
+## 5. Track your reading
 
 ```bash
-ebk stats ~/my-library
+book-memex book rate 42 ~/my-library --rating 5
+book-memex book favorite 42 ~/my-library
+book-memex book status 42 ~/my-library --set reading
+book-memex book progress 42 ~/my-library --set 45
 ```
 
-## 4. Organize with Tags
+## 6. Take notes
 
-### Add Tags
+Marginalia are notes and highlights attached to zero, one, or many books:
 
 ```bash
-# Hierarchical tags
-ebk tag list ~/my-library
-ebk tag tree ~/my-library
-
-# Tag a book (use the shell for this)
-ebk shell ~/my-library
-ebk:/$ ln /books/42 /tags/Work/Projects
+book-memex note add 42 ~/my-library --content "Great explanation of recursion"
+book-memex note add 42 ~/my-library --highlight "To iterate is human" --content "Nice line" --page 12
+book-memex note list 42 ~/my-library
+book-memex note extract 42 ~/my-library      # import highlights embedded in the PDF/EPUB
 ```
 
-### Create Views
-
-Views are named, composable library subsets:
+## 7. Read in the browser
 
 ```bash
-# Create a view of favorite Python books
-ebk view create python-favorites ~/my-library \
-    --subject Python \
-    --favorite
-
-# List views
-ebk view list ~/my-library
-
-# Show books in a view
-ebk view show python-favorites ~/my-library
+book-memex serve ~/my-library
+# Library UI: http://127.0.0.1:8000
+# Reader:     http://127.0.0.1:8000/read/42
 ```
 
-## 5. Track Your Reading
+The reader supports EPUB and PDF, captures highlights as marginalia, and syncs
+reading progress back to the library. See [Web Server and Reader](../user-guide/server.md).
+
+## 8. Export
 
 ```bash
-# Rate a book (0-5 stars)
-ebk book rate 42 ~/my-library --rating 5
-
-# Mark as favorite
-ebk book favorite 42 ~/my-library
-
-# Set reading status
-ebk book status 42 ~/my-library --set reading
-
-# Track progress
-ebk book progress 42 ~/my-library --set 45.5
+book-memex export arkiv ~/my-library ~/archive.zip          # ecosystem interchange format
+book-memex export html-app ~/my-library ~/library.html      # single-file offline app
+book-memex export html ~/my-library ~/catalog.html          # static HTML catalog
+book-memex export json ~/my-library ~/backup.json
+book-memex export goodreads ~/my-library ~/goodreads.csv
+book-memex export opds ~/my-library ~/opds/catalog.xml
 ```
 
-## 6. Interactive Shell
-
-Navigate your library like a Unix filesystem:
+For a full backup of the library directory (database, files, covers) use
+`book-memex lib backup`:
 
 ```bash
-ebk shell ~/my-library
-
-# Inside the shell:
-ebk:/$ ls
-authors/  books/  subjects/  tags/  similar/
-
-ebk:/$ cd books/
-ebk:/books$ ls | head 10
-
-ebk:/books$ cd 42/
-ebk:/books/42$ ls
-.metadata  .files  .covers  .similar
-
-ebk:/books/42$ cat .metadata
-{title: "Introduction to Algorithms", ...}
-
-ebk:/$ find author:Knuth rating:>=4
-ebk:/$ find subject:Python | wc
+book-memex lib backup ~/my-library -o ~/library-backup.tar.gz
 ```
 
-## 7. Export Your Library
+## 9. Set a default library (optional)
 
 ```bash
-# JSON (complete metadata)
-ebk export json ~/my-library ~/backup.json
+book-memex config --library-path ~/my-library
 
-# CSV
-ebk export csv ~/my-library ~/catalog.csv
-
-# Goodreads (for import into Goodreads)
-ebk export goodreads ~/my-library ~/goodreads.csv
-
-# Calibre (for import into Calibre)
-ebk export calibre ~/my-library ~/calibre.csv
-
-# HTML catalog
-ebk export html ~/my-library ~/catalog.html
-
-# OPDS feed (for e-reader apps)
-ebk export opds ~/my-library ~/opds/catalog.xml
+# Commands whose library argument is optional now use the default:
+book-memex query list
+book-memex query search "Python"
+book-memex query stats
 ```
 
-## 8. Web Interface
+Some commands (for example `tag`, `export`, `book purge`, `import calibre`,
+`import arkiv`) always require the library path. Check `--help` for each command.
+
+## 10. Connect an LLM client (optional)
 
 ```bash
-ebk serve ~/my-library
-# Open http://localhost:8000
+book-memex mcp-serve ~/my-library
 ```
 
-## 9. Configuration (Optional)
-
-Set defaults to avoid repeating the library path:
-
-```bash
-# Initialize config file
-ebk config init
-
-# Set default library
-ebk config set library.default_path ~/my-library
-
-# Now these work without specifying path:
-ebk list
-ebk search "Python"
-ebk stats
-```
+See [MCP Server](../integrations/mcp.md) for client configuration and the tool list.
 
 ## Python API
 
 ```python
 from pathlib import Path
-from ebk.library_db import Library
+from book_memex.library_db import Library
+from book_memex.services import PersonalMetadataService
 
-lib = Library.open(Path("~/my-library"))
+lib = Library.open(Path("~/my-library").expanduser())
 
-# Search
-results = lib.search("Python programming")
+results = lib.search("title:Python rating:>=4")
 
-# Fluent query
 books = (lib.query()
     .filter_by_author("Knuth")
     .filter_by_language("en")
@@ -225,8 +182,6 @@ books = (lib.query()
     .limit(10)
     .all())
 
-# Personal metadata
-from ebk.services import PersonalMetadataService
 pm = PersonalMetadataService(lib.session)
 pm.set_rating(42, 5.0)
 pm.set_reading_status(42, "reading")
@@ -234,26 +189,27 @@ pm.set_reading_status(42, "reading")
 lib.close()
 ```
 
-## Quick Reference
+## Quick reference
 
 | Task | Command |
 |------|---------|
-| Create library | `ebk init ~/library` |
-| Import file | `ebk import add book.pdf ~/library` |
-| Import folder | `ebk import folder ~/books ~/library` |
-| List books | `ebk list ~/library` |
-| Search | `ebk search "query" ~/library` |
-| Book info | `ebk book info 42 ~/library` |
-| Rate book | `ebk book rate 42 ~/library --rating 5` |
-| Set status | `ebk book status 42 ~/library --set reading` |
-| Export | `ebk export json ~/library ~/out.json` |
-| Web UI | `ebk serve ~/library` |
-| Shell | `ebk shell ~/library` |
+| Create library | `book-memex lib init ~/library` |
+| Import file | `book-memex import add book.pdf ~/library` |
+| Import folder | `book-memex import folder ~/books ~/library` |
+| List books | `book-memex query list ~/library` |
+| Search | `book-memex query search "query" ~/library` |
+| Book info | `book-memex book info 42 ~/library` |
+| Rate book | `book-memex book rate 42 ~/library --rating 5` |
+| Set status | `book-memex book status 42 ~/library --set reading` |
+| Add a note | `book-memex note add 42 ~/library --content "..."` |
+| Export (arkiv) | `book-memex export arkiv ~/library ~/archive.zip` |
+| Web UI + reader | `book-memex serve ~/library` |
+| MCP server | `book-memex mcp-serve ~/library` |
 
-## Next Steps
+## Next steps
 
-- [Configuration](configuration.md) - Customize defaults
-- [CLI Reference](../user-guide/cli.md) - Complete command documentation
-- [Python API](../user-guide/api.md) - Programmatic access
-- [Search Syntax](../user-guide/search.md) - Advanced queries
-- [Import/Export](../user-guide/import-export.md) - Data formats
+- [Configuration](configuration.md): customize defaults
+- [CLI Reference](../user-guide/cli.md): complete command documentation
+- [Python API](../user-guide/api.md): programmatic access
+- [Search Syntax](../user-guide/search.md): advanced queries
+- [Import/Export](../user-guide/import-export.md): data formats

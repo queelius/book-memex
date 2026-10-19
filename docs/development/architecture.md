@@ -1,119 +1,84 @@
 # Architecture
 
-ebk's architecture and design patterns.
+## Principles
 
-## Overview
+1. **Thin domain archive.** book-memex stores and exposes books and reading data.
+   Embeddings, cross-archive graphs, trails, and LLM orchestration belong to the
+   `memex` federation layer, not here.
+2. **SQLAlchemy + SQLite + FTS5.** A normalized schema in one `library.db`, with
+   two FTS5 indexes.
+3. **Thin routers, fat services.** `cli.py` and `server.py` delegate to
+   `services/`; the MCP tools in `mcp/tools.py` sit on the same services.
+4. **Durable identity.** Books have a canonical `unique_id`; marginalia and
+   reading sessions have UUIDs; all are addressable as `book-memex://` URIs.
+5. **Soft delete.** Record tables carry `archived_at`; deletes archive by default.
 
-ebk is built around several key architectural principles:
+## Package layout (`book_memex/`)
 
-1. **SQLAlchemy ORM** - Database-first design with normalized schema
-2. **Service Layer** - Business logic separated from data access
-3. **Fluent API** - Method chaining for intuitive queries
-4. **Configuration Management** - Centralized settings with CLI overrides
-5. **MCP Integration** - AI assistant access via Model Context Protocol
+| Module | Role |
+|--------|------|
+| `cli.py` | Typer CLI (`book-memex <group> <command>`). |
+| `_ebk_alias.py` | Legacy `ebk` entry point: deprecation notice, then forwards to the CLI. |
+| `library_db.py` | `Library` (open, add, search, query, personal data, arkiv) and the fluent `QueryBuilder`. |
+| `server.py` | FastAPI app: REST endpoints, library UI, `/read/{book_id}` reader shell. |
+| `server/static/`, `server/templates/` | Reader assets (`reader.js`, `reader.css`, vendored EPUB.js / JSZip / PDF.js). |
+| `opds.py` | Live OPDS 1.2 catalog router mounted at `/opds`. |
+| `mcp/` | `server.py` (FastMCP tool registration), `tools.py` (`*_impl` functions), `sql_executor.py` (read-only SQL). |
+| `config.py` | Configuration dataclasses; reads `~/.config/ebk/config.json`. |
+| `search_parser.py` | Field / boolean / comparison search syntax compiled to FTS5 + SQL. |
+| `ident.py` | Canonical `unique_id` generation. |
+| `extract_metadata.py`, `calibre_import.py` | Metadata extraction and Calibre import. |
+| `core/` | DB-free helpers: `uri.py` (build/parse URIs), `soft_delete.py` (`filter_active`, `archive`, `restore`, `hard_delete`), `fts.py` (`safe_fts_query`). |
+| `db/` | `models.py` (ORM), `session.py` (init, FTS5 setup), `migrations.py` (schema version 12). |
+| `services/` | Domain operations (see below). |
+| `exports/` | `arkiv.py`, `html_app.py`, `html_library.py`, `opds_export.py`, `echo_export.py`, and helpers. |
+| `views/` | Views DSL (`dsl.py`) and `ViewService` (`service.py`). |
+| `similarity/` | Book-similarity extractors, metrics, and `BookSimilarity` (optional `similarity` extra). |
 
-## Core Components
+### Services
 
-### Database Layer (`ebk/db/`)
+- `import_service`: imports with hash-based deduplication, metadata, and covers.
+- `text_extraction`: full-file text (PyMuPDF with a pypdf fallback, ebooklib, plaintext).
+- `content_extraction/{epub,pdf,txt}.py` + `content_indexer`: per-segment
+  extraction into `book_content`, maintaining `book_content_fts`.
+- `annotation_extraction`: imports highlights/notes embedded in PDF/EPUB files.
+- `marginalia_service`, `reading_session_service`, `personal_metadata_service`,
+  `tag_service`, `queue_service`, `view_service`, `export_service`,
+  `arkiv_import`.
 
-**Models** (`models.py`):
-- `Book` - Core book entity with metadata
-- `Author` - Author information with sort names
-- `Subject` - Tags/subjects/categories
-- `Tag` - Hierarchical user-defined tags (separate from subjects)
-- `File` - Physical file records with hash-based deduplication
-- `ExtractedText` - Full text from ebooks
-- `TextChunk` - Overlapping chunks for search
-- `Cover` - Cover images with thumbnails
-- `PersonalMetadata` - Ratings, favorites, reading status
-- `View` - Named view definitions (Views DSL)
-- `ViewOverride` - Per-book metadata overrides within views
-- `BooksFTS` - FTS5 virtual table for full-text search
+## Data model
 
-**Session Management** (`session.py`):
-- Database initialization and schema creation
-- FTS5 index setup
-- Connection pooling
+Core tables: `books`, `authors`, `subjects`, `contributors`, `identifiers`,
+`files`, `covers`, `tags` (hierarchical), `personal_metadata` (rating, favorite,
+reading status, `reading_progress`, `progress_anchor`), `reviews`, `marginalia`
+(+ `marginalia_books`), `reading_sessions`, `book_content` (per-segment text with
+`segment_type`, `segment_index`, and a JSON `anchor`), `views` / `view_overrides`,
+`extracted_texts`, and the migration log `schema_versions`. The
+`concepts` / `book_concepts` / `concept_relations` tables are a legacy knowledge-graph
+schema flagged to move to the federation layer.
 
-**Migrations** (`migrations.py`):
-- Sequential schema versioning via `schema_versions` table
-- Idempotent migrations (check-before-apply pattern)
-- Run with `ebk migrate` or `run_all_migrations()`
-- Current schema version: 7
+Full-text search:
 
-### Views DSL (`ebk/views/`)
+- **`books_fts`**: title, description, and extracted text (truncated). Drives
+  `Library.search()`, `query search`, and `/api/search`. It is written when text
+  is extracted and on `reindex-metadata`.
+- **`book_content_fts`**: an external-content FTS5 table over `book_content`.
+  Drives the content-search REST endpoints and MCP tools; rebuilt by
+  `reindex-content`.
 
-Composable query language for named library subsets:
+Migrations are idempotent functions in `db/migrations.py`, recorded in
+`schema_versions`, and run automatically on `Library.open()`.
 
-- **DSL Evaluator** (`dsl.py`) - Three-stage pipeline: `evaluate(view) = order(transform(select(library)))`
-- **View Service** (`service.py`) - CRUD, membership, override management
-- Supports: filters, set operations (union/intersect/difference), view references, raw SQL selectors
-- Security: SQL selectors use read-only connections + SQLite authorizer whitelist
-- Cycle detection for recursive view references with depth limits
+## Surfaces
 
-### Service Layer (`ebk/services/`)
+- **CLI** for imports, exports, and housekeeping.
+- **REST + reader** (`book-memex serve`), loopback-only unless `--allow-remote`.
+- **MCP** (`book-memex mcp-serve`), the LLM-facing query surface: read-only SQL,
+  schema, URI resolution, content search, and marginalia/reading CRUD.
 
-**Import Service** (`import_service.py`):
-- Book import with metadata extraction
-- Hash-based file deduplication
-- Cover extraction and thumbnail generation
-- Text extraction coordination
+## Design patterns
 
-**Text Extraction** (`text_extraction.py`):
-- PDF extraction (PyMuPDF, pypdf fallback)
-- EPUB extraction (ebooklib)
-- Plaintext handling
-- Chunking for search
-
-### MCP Server (`ebk/mcp/`)
-
-Model Context Protocol server for AI assistant integration (e.g., Claude Code). Launched via `ebk mcp-serve [library-path]` over stdio transport.
-
-**Tools:**
-
-- `get_schema` - Introspects the database via SQLAlchemy's inspection API, returning tables, columns, foreign keys, and ORM relationships.
-- `execute_sql` - Read-only SQL query execution with 3-layer security:
-    1. Prefix check (only `SELECT`, no multi-statement)
-    2. Read-only SQLite connection (`?mode=ro`)
-    3. SQLite authorizer callback (whitelist: `SELECT`, `READ`, `FUNCTION`)
-- `update_books` - Batch book metadata updates: scalar fields, collection operations (tags, authors, subjects), and book merging.
-
-**Key files:**
-- `server.py` - FastMCP instance creation and stdio transport runner
-- `tools.py` - Tool implementations (`get_schema_impl`, `execute_sql_impl`, `update_books_impl`)
-- `sql_executor.py` - `ReadOnlySQLExecutor` with defense-in-depth
-
-### Configuration (`ebk/config.py`)
-
-Three configuration sections:
-- `ServerConfig` - Host, port, auto-open, page size
-- `CLIConfig` - Verbosity, color, page size
-- `LibraryConfig` - Default library path
-
-Stored at: `~/.config/ebk/config.json`
-
-### Web Server (`ebk/server.py`)
-
-FastAPI-based REST API:
-- Book CRUD operations
-- Search and filtering
-- Cover serving
-- File downloads
-- Reading status management
-
-### CLI (`ebk/cli.py`)
-
-Typer-based command-line interface:
-- `db-*` commands for library management
-- `serve` for web server
-- `mcp-serve` for MCP server
-- `config` for configuration management
-
-## Design Patterns
-
-### Fluent Query API
-
-Method chaining for intuitive queries:
+### Fluent query API
 
 ```python
 results = (lib.query()
@@ -124,63 +89,37 @@ results = (lib.query()
     .all())
 ```
 
-### Hash-Based Deduplication
+### Hash-based deduplication
 
-Files deduplicated using SHA256:
-- Same file (same hash) → skipped
-- Same book, different format → added as additional format
-- Hash-prefixed storage: `files/ab/abc123.pdf`
+Files are hashed with SHA-256 and stored as `files/<prefix>/<hash>.<ext>`. The same
+file is skipped; the same book in another format becomes an additional `File`.
 
-### Configuration Hierarchy
+### URIs and fragments
 
-CLI options > Config file > Defaults:
+Records get URI kinds (`book`, `marginalia`, `reading`); positions within a book
+are fragments on the book URI (`#epubcfi(...)`, `#page=47`). Content-search hits
+come with a ready-made fragment.
 
-```python
-# Load config with defaults
-config = load_config()
+### Configuration hierarchy
 
-# Override from CLI
-if cli_host:
-    config.server.host = cli_host
-```
+Command-line options override the config file, which overrides built-in defaults.
 
-## Database Schema
+## Key technologies
 
-Library directory structure:
-```
-my-library/
-├── library.db              # SQLite database
-├── files/                  # Hash-prefixed ebook storage
-│   ├── ab/
-│   │   └── abc123...pdf
-│   └── cd/
-│       └── cde456...epub
-└── covers/                 # Cover images
-    ├── ab/
-    │   └── abc123.jpg
-    └── thumbnails/
-        └── abc123_thumb.jpg
-```
+SQLAlchemy, SQLite FTS5, FastAPI, Typer + Rich, PyMuPDF / pypdf, ebooklib,
+Pillow, FastMCP (`mcp`), EPUB.js, PDF.js, sql.js (HTML app export), and the
+`arkiv` package for bundle I/O.
 
-## Key Technologies
+## Extension points
 
-- **SQLAlchemy** - ORM and database toolkit
-- **SQLite** with **FTS5** - Database and full-text search
-- **FastAPI** - Web framework for REST API
-- **Typer** + **Rich** - CLI framework with colored output
-- **PyMuPDF** / **pypdf** - PDF text extraction
-- **ebooklib** - EPUB parsing
-- **Pillow** - Image processing for covers
-- **FastMCP** - Model Context Protocol server
+1. **Export formats**: add a module under `book_memex/exports/` and a command in
+   the `export` group.
+2. **Content extractors**: add an adapter under `services/content_extraction/`.
+3. **MCP tools**: add an `*_impl` in `mcp/tools.py` and register it in
+   `mcp/server.py`; keep REST and MCP in parity.
 
-## Extension Points
+## See also
 
-1. **Metadata Extractors** - Add to `integrations/metadata/`
-2. **Export Formats** - Add to `ebk/exports/`
-3. **MCP Tools** - Add tools to `ebk/mcp/server.py`
-
-## See Also
-
-- [Contributing Guide](contributing.md) - How to contribute
-- [API Reference](api-reference.md) - Python API documentation
-- Source code on [GitHub](https://github.com/queelius/ebk)
+- [Contributing Guide](contributing.md)
+- [API Reference](api-reference.md)
+- Source code on [GitHub](https://github.com/queelius/book-memex)

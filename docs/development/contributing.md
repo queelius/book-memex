@@ -1,193 +1,92 @@
 # Contributing
 
-Guide to contributing to ebk.
+Contributions are welcome: bug fixes, features, documentation, and issue reports.
 
-We welcome contributions! Whether you're fixing bugs, adding features, improving documentation, or reporting issues, your help is appreciated.
+## Development setup
 
-## Development Setup
-
-### Prerequisites
-
-- Python 3.10 or higher
-- Git
-- (Optional) Ollama for LLM features
-
-### Setup Steps
+Prerequisites: Python 3.10+ and Git.
 
 ```bash
-# Clone the repository
-git clone https://github.com/queelius/ebk.git
-cd ebk
+git clone https://github.com/queelius/book-memex.git
+cd book-memex
 
-# Create virtual environment and install dependencies
-make setup
+make setup            # create a virtual environment and install ".[dev,all]"
 
-# Or manually:
+# or manually:
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e ".[dev,all]"
+source .venv/bin/activate        # On Windows: .venv\Scripts\activate
+pip install -e ".[dev]"          # dev pulls in the mcp, server, and similarity extras
 ```
 
-## Running Tests
+## Running tests
 
 ```bash
-# Run all tests
-make test
-
-# Run with coverage
+pytest                                             # full suite
+pytest tests/test_server_marginalia.py -v          # one file
+make test-file FILE=tests/test_server_marginalia.py
+pytest -k "marginalia or reading" -v               # keyword filter
+pytest -m "not slow"                               # skip slow tests
+pytest --cov=book_memex --cov-report=term-missing  # coverage
 make test-coverage
-
-# Run specific test file
-pytest tests/test_library_api.py -v
-
-# Run unit tests only
-pytest -m unit
-
-# Run integration tests only
-pytest -m integration
 ```
 
-## Code Quality
+## Code quality
 
 ```bash
-# Run linters
-make lint
-
-# Format code
-make format
-
-# Check formatting
-make format-check
+make lint            # linters
+make format          # black + isort
+make format-check    # check formatting without changing files
 ```
 
-## Making Changes
+## Building the documentation
 
-1. **Create a branch** for your changes:
-   ```bash
-   git checkout -b feature/my-new-feature
-   ```
+The site is built with MkDocs (Material theme). CI builds it in strict mode, so
+broken links or nav entries fail the build:
 
-2. **Make your changes** following the project style:
-   - Use type hints
-   - Add docstrings to public APIs
-   - Follow PEP 8 style guide
-   - Keep functions focused and small
-
-3. **Write tests** for new functionality:
-   - Add unit tests in `tests/`
-   - Aim for >80% code coverage
-   - Test edge cases and error handling
-
-4. **Update documentation**:
-   - Update `/docs` for user-facing changes
-   - Update docstrings for API changes
-   - Add examples for new features
-
-5. **Commit your changes**:
-   ```bash
-   git add .
-   git commit -m "Add feature: brief description"
-   ```
-
-6. **Push and create PR**:
-   ```bash
-   git push origin feature/my-new-feature
-   ```
-   Then create a pull request on GitHub.
-
-## Project Structure
-
-```
-ebk/
-├── ebk/                    # Main package
-│   ├── ai/                # AI/LLM features
-│   ├── db/                # Database models
-│   ├── services/          # Business logic
-│   ├── cli.py            # CLI commands
-│   ├── server.py         # Web server
-│   └── config.py         # Configuration
-├── tests/                 # Test suite
-├── docs/                  # Documentation
-└── integrations/          # Optional integrations
+```bash
+pip install "mkdocs>=1.6,<2" mkdocs-material "mkdocstrings[python]" pymdown-extensions
+mkdocs build --clean --strict
+mkdocs serve          # live preview at http://127.0.0.1:8000
 ```
 
-## Code Style Guidelines
+Add new pages under `docs/` and list them in the `nav` section of `mkdocs.yml`.
+`docs/superpowers/` holds internal design specs and plans and is intentionally
+not in the nav.
 
-- **Type Hints**: Use type hints for all function signatures
-- **Docstrings**: Use Google-style docstrings
-- **Naming**:
-  - `snake_case` for functions and variables
-  - `PascalCase` for classes
-  - `UPPER_CASE` for constants
-- **Line Length**: Maximum 100 characters
-- **Imports**: Group standard library, third-party, and local imports
+## Making changes
 
-## Adding New Features
+1. Create a branch: `git checkout -b feature/my-change`.
+2. Keep `cli.py` and `server.py` thin; put logic in `services/`.
+3. New record tables get an `archived_at TIMESTAMP NULL` column and a migration in
+   `db/migrations.py` (idempotent, bump `CURRENT_SCHEMA_VERSION`).
+4. Keep REST and MCP in parity: a new REST operation should have a matching MCP
+   tool, and vice versa.
+5. Route user-supplied FTS5 queries through `book_memex.core.fts.safe_fts_query`.
+6. Add tests, and update `docs/` for user-facing changes.
+7. Open a pull request on GitHub.
 
-### Adding an LLM Provider
+### Adding a CLI command
 
-1. Create new file in `ebk/ai/llm_providers/`
-2. Subclass `BaseLLMProvider`
-3. Implement required methods
-4. Add tests in `tests/ai/`
-5. Update documentation
+Add the function to the relevant Typer sub-app in `book_memex/cli.py`
+(`import_app`, `export_app`, `book_app`, ...), give it help text and examples,
+resolve the library path with the config fallback where the argument is
+optional, and document it in `docs/user-guide/cli.md`.
 
-Example:
-```python
-from .base import BaseLLMProvider, LLMResponse
+## Code style
 
-class MyProvider(BaseLLMProvider):
-    @property
-    def name(self) -> str:
-        return "my_provider"
+- Type hints on public functions; Google-style docstrings.
+- `snake_case` functions and variables, `PascalCase` classes, `UPPER_CASE` constants.
+- Line length 100.
 
-    async def complete(self, prompt: str, **kwargs) -> LLMResponse:
-        # Implementation
-        pass
-```
+## Reporting issues
 
-### Adding a CLI Command
+Include the book-memex version (`pip show book-memex`), Python version, OS, steps
+to reproduce, expected vs. actual behavior, and any error output.
 
-1. Add command function in `ebk/cli.py`
-2. Use `@app.command()` decorator
-3. Add type hints and help text
-4. Load config defaults when appropriate
-5. Update `docs/user-guide/cli.md`
-
-### Adding Documentation
-
-1. Add markdown files to appropriate `/docs` subdirectory
-2. Update `mkdocs.yml` navigation
-3. Follow existing documentation style
-4. Include code examples
-5. Test with `mkdocs serve`
-
-## Reporting Issues
-
-When reporting bugs, please include:
-
-- ebk version (`ebk --version`)
-- Python version
-- Operating system
-- Steps to reproduce
-- Expected vs actual behavior
-- Error messages and stack traces
-
-## Feature Requests
-
-For feature requests, please describe:
-
-- The use case
-- Why existing features don't suffice
-- Proposed API or interface
-- Any implementation ideas
-
-## Questions?
-
-- Open an issue on [GitHub](https://github.com/queelius/ebk/issues)
-- Check existing [documentation](https://queelius.github.io/ebk/)
-- Review [architecture documentation](architecture.md)
+- [GitHub Issues](https://github.com/queelius/book-memex/issues)
+- [Architecture](architecture.md)
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's MIT License.
+By contributing you agree that your contributions are licensed under the
+project's MIT License.
