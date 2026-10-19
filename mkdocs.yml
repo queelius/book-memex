@@ -1,9 +1,12 @@
-site_name: ebk - eBook Library Manager
-site_description: A lightweight and versatile tool for managing eBook metadata with a fluent API
+site_name: book-memex
+site_description: >-
+  eBook library manager and the book-domain archive of the *-memex
+  personal-data ecosystem: SQLite + FTS5 library, browser reader,
+  marginalia, MCP server, and arkiv export
 site_author: Alex Towell
-site_url: https://queelius.github.io/ebk/
-repo_name: queelius/ebk
-repo_url: https://github.com/queelius/ebk
+site_url: https://queelius.github.io/book-memex/
+repo_name: queelius/book-memex
+repo_url: https://github.com/queelius/book-memex
 edit_uri: edit/master/docs/
 
 theme:
@@ -69,14 +72,12 @@ nav:
   - User Guide:
       - CLI Reference: user-guide/cli.md
       - Python API: user-guide/api.md
-      - Web Server: user-guide/server.md
+      - Web Server and Reader: user-guide/server.md
       - Import/Export: user-guide/import-export.md
       - Search & Query: user-guide/search.md
       - Library Management: user-guide/library-management.md
   - Advanced:
-      - Hugo Export: advanced/hugo-export.md
-      - Symlink DAG: advanced/symlink-dag.md
-      - Recommendations: advanced/recommendations.md
+      - Similar Books: advanced/similar-books.md
       - Batch Operations: advanced/batch-operations.md
   - Integrations:
       - Overview: integrations/index.md
@@ -92,6 +93,6 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/queelius/ebk
+      link: https://github.com/queelius/book-memex
     - icon: fontawesome/solid/globe
       link: https://metafunctor.com
