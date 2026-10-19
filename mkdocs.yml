@@ -80,9 +80,7 @@ nav:
       - Batch Operations: advanced/batch-operations.md
   - Integrations:
       - Overview: integrations/index.md
-      - Streamlit Dashboard: integrations/streamlit.md
       - MCP Server: integrations/mcp.md
-      - Visualizations: integrations/visualizations.md
   - Development:
       - Architecture: development/architecture.md
       - Contributing: development/contributing.md

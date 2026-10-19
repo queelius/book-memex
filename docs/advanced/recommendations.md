@@ -25,4 +25,3 @@ Finding similar books and getting recommendations.
 
 ## See Also
 - [CLI Reference](../user-guide/cli.md) - Command reference
-- [LLM Features](../user-guide/llm-features.md) - AI-powered capabilities

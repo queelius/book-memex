@@ -32,7 +32,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
+          # mkdocs<2: MkDocs 2.0 removes the plugin system this site relies on
+          # (material, mkdocstrings) and has no migration path.
+          pip install "mkdocs>=1.6,<2" mkdocs-material "mkdocstrings[python]" pymdown-extensions
 
       - name: Build documentation
         run: mkdocs build --clean --strict --verbose

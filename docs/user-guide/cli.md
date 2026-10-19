@@ -349,6 +349,5 @@ ebk export zip ~/my-library ~/backup-$(date +%Y%m%d).zip
 ## See Also
 
 - [Configuration Guide](../getting-started/configuration.md) - Configure defaults
-- [LLM Features](llm-features.md) - AI-powered enrichment
 - [Web Server](server.md) - Web interface details
 - [Python API](api.md) - Programmatic access

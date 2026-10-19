@@ -458,6 +458,5 @@ lib.close()
 ## Further Reading
 
 - [CLI Reference](cli.md) - Command-line interface
-- [LLM Features](llm-features.md) - AI-powered metadata enrichment
 - [Search & Query](search.md) - Advanced search syntax
 - [Import/Export](import-export.md) - Data interchange formats
